@@ -21,9 +21,13 @@ def run() -> None:
 
 
 @app.command()
-def start() -> None:
+def start(force: bool = typer.Option(False, "--force", help="Replace conflicting listeners on EZLLM ports.")) -> None:
     """Start EZLLM in the background."""
-    typer.echo(RuntimeManager(load_settings()).start_background())
+    try:
+        typer.echo(RuntimeManager(load_settings()).start_background(force=force))
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -33,11 +37,17 @@ def stop() -> None:
 
 
 @app.command()
-def restart() -> None:
+def restart(
+    force: bool = typer.Option(False, "--force", help="Replace conflicting listeners on EZLLM ports.")
+) -> None:
     """Restart EZLLM."""
     manager = RuntimeManager(load_settings())
     typer.echo(manager.stop())
-    typer.echo(manager.start_background())
+    try:
+        typer.echo(manager.start_background(force=force))
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()

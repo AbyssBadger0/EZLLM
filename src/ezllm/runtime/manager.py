@@ -8,6 +8,7 @@ from ezllm.platform.linux import LinuxPlatformAdapter
 from ezllm.platform.macos import MacOSPlatformAdapter
 from ezllm.platform.windows import WindowsPlatformAdapter
 from ezllm.proxy.app import build_app
+from ezllm.runtime.ports import choose_port_conflict_action
 from ezllm.runtime.process import spawn_background
 from ezllm.runtime.state import RuntimeState, save_runtime_state
 from ezllm.runtime.state import load_runtime_state
@@ -62,18 +63,26 @@ class RuntimeManager:
         finally:
             self._clear_state()
 
-    def start_background(self) -> str:
-        command = [
-            sys.executable,
-            "-c",
-            (
-                "from pathlib import Path; "
-                "import uvicorn; "
-                "from ezllm.proxy.app import build_app; "
-                f"uvicorn.run(build_app(log_dir=Path(r'{self.settings.runtime.log_dir}')), "
-                f"host={self.settings.runtime.host!r}, port={self.settings.runtime.proxy_port!r})"
-            ),
-        ]
+    def start_background(self, *, force: bool = False) -> str:
+        listeners_by_port = self._listeners_by_port()
+        listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
+        owned_pids = self._owned_pids_from_state()
+        action = choose_port_conflict_action(
+            requested_force=force,
+            owned_pids=owned_pids,
+            listeners_by_port=listeners_by_port,
+        )
+
+        if action == "error":
+            raise RuntimeError("EZLLM ports are already in use by another process. Re-run with --force.")
+        if action == "restart":
+            self._terminate_pids(listeners, force=False)
+            self._clear_state()
+        elif action == "force":
+            self._terminate_pids(listeners, force=True)
+            self._clear_state()
+
+        command = self._background_command()
         process = spawn_background(command)
         save_runtime_state(
             self.state_dir,
@@ -82,7 +91,7 @@ class RuntimeManager:
                 llama_pid=None,
                 proxy_port=self.settings.runtime.proxy_port,
                 llama_port=self.settings.runtime.llama_port,
-                status="running",
+                status="starting",
             ),
         )
         return self.format_status()
@@ -92,18 +101,7 @@ class RuntimeManager:
         if state is None:
             return "EZLLM not running"
 
-        pids = {
-            pid
-            for pid in (
-                state.proxy_pid,
-                state.llama_pid,
-                *self.platform_adapter.find_listening_pids(state.proxy_port),
-                *self.platform_adapter.find_listening_pids(state.llama_port),
-            )
-            if pid
-        }
-        for pid in pids:
-            self.platform_adapter.terminate_tree(pid)
+        self._terminate_pids(self._owned_pids(state), force=False)
 
         self._clear_state()
         return "EZLLM stopped"
@@ -133,3 +131,36 @@ class RuntimeManager:
                 path.unlink()
             except FileNotFoundError:
                 continue
+
+    def _background_command(self) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            (
+                "from ezllm.config.loader import load_settings; "
+                "from ezllm.runtime.manager import RuntimeManager; "
+                "RuntimeManager(load_settings()).run_foreground()"
+            ),
+        ]
+
+    def _listeners_by_port(self) -> dict[int, set[int]]:
+        return {
+            self.settings.runtime.proxy_port: self.platform_adapter.find_listening_pids(
+                self.settings.runtime.proxy_port
+            ),
+            self.settings.runtime.llama_port: self.platform_adapter.find_listening_pids(
+                self.settings.runtime.llama_port
+            ),
+        }
+
+    def _owned_pids_from_state(self) -> set[int]:
+        return self._owned_pids(load_runtime_state(self.state_dir))
+
+    def _owned_pids(self, state) -> set[int]:
+        if state is None:
+            return set()
+        return {pid for pid in (state.proxy_pid, state.llama_pid) if pid}
+
+    def _terminate_pids(self, pids: set[int], *, force: bool) -> None:
+        for pid in pids:
+            self.platform_adapter.terminate_tree(pid, force=force)

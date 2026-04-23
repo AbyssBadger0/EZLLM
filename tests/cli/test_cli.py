@@ -89,8 +89,9 @@ def test_start_is_wired_to_runtime_manager(monkeypatch, tmp_path):
         def __init__(self, incoming_settings):
             called["settings"] = incoming_settings
 
-        def start_background(self):
+        def start_background(self, *, force=False):
             called["started"] = True
+            called["force"] = force
             return "EZLLM started"
 
     monkeypatch.setattr("ezllm.cli.load_settings", lambda: settings)
@@ -102,4 +103,66 @@ def test_start_is_wired_to_runtime_manager(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert called["settings"] is settings
     assert called["started"] is True
+    assert called["force"] is False
     assert "started" in result.stdout.lower()
+
+
+def test_start_accepts_force_flag(monkeypatch, tmp_path):
+    called = {}
+
+    settings = SimpleNamespace(
+        runtime=SimpleNamespace(state_dir=str(tmp_path), host="127.0.0.1", proxy_port=8888, llama_port=8889),
+        llama=SimpleNamespace(server_bin="llama-server", model_path="model.gguf"),
+    )
+
+    class FakeManager:
+        def __init__(self, incoming_settings):
+            called["settings"] = incoming_settings
+
+        def start_background(self, *, force=False):
+            called["force"] = force
+            return "EZLLM starting"
+
+    monkeypatch.setattr("ezllm.cli.load_settings", lambda: settings)
+    monkeypatch.setattr("ezllm.cli.RuntimeManager", FakeManager)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["start", "--force"])
+
+    assert result.exit_code == 0
+    assert called["settings"] is settings
+    assert called["force"] is True
+
+
+def test_restart_accepts_force_flag(monkeypatch, tmp_path):
+    called = []
+
+    settings = SimpleNamespace(
+        runtime=SimpleNamespace(state_dir=str(tmp_path), host="127.0.0.1", proxy_port=8888, llama_port=8889),
+        llama=SimpleNamespace(server_bin="llama-server", model_path="model.gguf"),
+    )
+
+    class FakeManager:
+        def __init__(self, incoming_settings):
+            called.append(("init", incoming_settings))
+
+        def stop(self):
+            called.append(("stop", None))
+            return "EZLLM stopped"
+
+        def start_background(self, *, force=False):
+            called.append(("start_background", force))
+            return "EZLLM starting"
+
+    monkeypatch.setattr("ezllm.cli.load_settings", lambda: settings)
+    monkeypatch.setattr("ezllm.cli.RuntimeManager", FakeManager)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["restart", "--force"])
+
+    assert result.exit_code == 0
+    assert called == [
+        ("init", settings),
+        ("stop", None),
+        ("start_background", True),
+    ]
