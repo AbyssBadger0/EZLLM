@@ -43,6 +43,10 @@ class RuntimeManager:
         )
 
     def run_foreground(self) -> None:
+        listeners_by_port = self._listeners_by_port()
+        listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
+        if listeners:
+            raise RuntimeError("EZLLM proxy port is already in use.")
         app = build_app(log_dir=Path(self.settings.runtime.log_dir), settings=self.settings)
         save_runtime_state(
             self.state_dir,
@@ -91,7 +95,7 @@ class RuntimeManager:
         if state is None:
             return "EZLLM not running"
 
-        self._terminate_pids(self._owned_pids(state), force=False)
+        self._terminate_pids(self._verified_owned_pids(state), force=False)
 
         self._clear_state()
         return "EZLLM stopped"
@@ -163,6 +167,14 @@ class RuntimeManager:
         if state is None:
             return set()
         return {pid for pid in (state.proxy_pid,) if pid}
+
+    def _verified_owned_pids(self, state) -> set[int]:
+        owned_pids = self._owned_pids(state)
+        if not owned_pids:
+            return set()
+        listeners_by_port = self._listeners_by_port()
+        listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
+        return {pid for pid in owned_pids if pid in listeners}
 
     def _terminate_pids(self, pids: set[int], *, force: bool) -> None:
         for pid in pids:

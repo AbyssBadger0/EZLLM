@@ -114,7 +114,7 @@ def test_runtime_manager_stop_only_terminates_owned_proxy_pid_from_state(tmp_pat
 
     class FakePlatformAdapter:
         def find_listening_pids(self, port):
-            return {999}
+            return {101}
 
         def terminate_tree(self, pid, *, force=False):
             terminated.append((pid, force))
@@ -136,6 +136,36 @@ def test_runtime_manager_stop_only_terminates_owned_proxy_pid_from_state(tmp_pat
 
     assert result == "EZLLM stopped"
     assert set(terminated) == {(101, False)}
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_ignores_stale_state_when_proxy_listener_is_different(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return {999}
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=202,
+            proxy_port=8888,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == []
     assert load_runtime_state(tmp_path) is None
 
 
@@ -265,6 +295,40 @@ def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tm
     assert state is not None
     assert state.proxy_pid == 606
     assert state.status == "starting"
+
+
+def test_runtime_manager_run_foreground_refuses_to_clobber_existing_running_state(tmp_path, monkeypatch):
+    uvicorn_called = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return {101}
+
+        def terminate_tree(self, pid, *, force=False):
+            raise AssertionError("run_foreground should not terminate processes")
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+    monkeypatch.setattr("ezllm.runtime.manager.uvicorn.run", lambda *args, **kwargs: uvicorn_called.append(True))
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    with pytest.raises(RuntimeError, match="already in use"):
+        manager.run_foreground()
+
+    state = load_runtime_state(tmp_path)
+    assert uvicorn_called == []
+    assert state is not None
+    assert state.proxy_pid == 101
+    assert state.status == "running"
 
 
 def test_runtime_manager_start_background_force_terminates_foreign_listeners(tmp_path, monkeypatch):
