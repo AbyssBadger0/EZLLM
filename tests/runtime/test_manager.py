@@ -1,5 +1,8 @@
+import os
+import sys
 from types import SimpleNamespace
 
+import psutil
 import pytest
 
 from ezllm.runtime.manager import RuntimeManager
@@ -201,6 +204,71 @@ def test_runtime_manager_stop_uses_persisted_proxy_port_when_config_drifted(tmp_
     assert load_runtime_state(tmp_path) is None
 
 
+def test_runtime_manager_stop_terminates_starting_proxy_pid_without_listener(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=os.getpid(),
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=manager._started_at_for_pid(os.getpid()),
+        ),
+    )
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == [(os.getpid(), False)]
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_does_not_kill_stale_starting_proxy_pid(tmp_path, monkeypatch):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    class MissingProcess:
+        def __init__(self, pid):
+            raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr("ezllm.runtime.manager.psutil.Process", MissingProcess)
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == []
+    assert load_runtime_state(tmp_path) is None
+
+
 def test_runtime_manager_start_background_rejects_foreign_port_conflicts_without_force(
     tmp_path, monkeypatch
 ):
@@ -258,6 +326,102 @@ def test_runtime_manager_start_background_restarts_owned_port_conflicts(tmp_path
     assert state is not None
     assert state.proxy_pid == 303
     assert state.status == "starting"
+
+
+def test_runtime_manager_start_background_treats_starting_proxy_pid_without_listener_as_owned_conflict(
+    tmp_path, monkeypatch
+):
+    terminated = []
+    spawned = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=os.getpid(),
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=manager._started_at_for_pid(os.getpid()),
+        ),
+    )
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.spawn_background",
+        lambda command: spawned.append(command) or SimpleNamespace(pid=202),
+    )
+
+    result = manager.start_background(force=False)
+    state = load_runtime_state(tmp_path)
+
+    assert "starting" in result.lower()
+    assert terminated == [(os.getpid(), False)]
+    assert len(spawned) == 1
+    assert state is not None
+    assert state.proxy_pid == 202
+
+
+def test_runtime_manager_start_background_treats_legacy_background_child_without_started_at_as_owned_conflict(
+    tmp_path, monkeypatch
+):
+    terminated = []
+    spawned = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    class LegacyBackgroundProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def create_time(self):
+            return 1234.0
+
+        def cmdline(self):
+            return [
+                sys.executable,
+                "-c",
+                "from ezllm.proxy.app import build_app; import uvicorn; uvicorn.run(build_app(log_dir='logs', settings=None))",
+            ]
+
+    monkeypatch.setattr("ezllm.runtime.manager.psutil.Process", LegacyBackgroundProcess)
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.spawn_background",
+        lambda command: spawned.append(command) or SimpleNamespace(pid=202),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.start_background(force=False)
+    state = load_runtime_state(tmp_path)
+
+    assert "starting" in result.lower()
+    assert terminated == [(101, False)]
+    assert len(spawned) == 1
+    assert state is not None
+    assert state.proxy_pid == 202
 
 
 def test_runtime_manager_start_background_restart_does_not_kill_foreign_listener_after_churn(
@@ -402,6 +566,157 @@ def test_runtime_manager_run_foreground_refuses_to_clobber_existing_running_stat
     assert state is not None
     assert state.proxy_pid == 101
     assert state.status == "running"
+
+
+def test_runtime_manager_run_foreground_does_not_self_conflict_with_matching_starting_state(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            raise AssertionError("run_foreground should not terminate processes")
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+    current_pid = os.getpid()
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=current_pid,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=manager._started_at_for_pid(current_pid),
+        ),
+    )
+    monkeypatch.setattr("ezllm.runtime.manager.build_app", lambda **kwargs: object())
+
+    def fake_uvicorn_run(*args, **kwargs):
+        state = load_runtime_state(tmp_path)
+        calls.append((args, kwargs, state.proxy_pid if state else None, state.status if state else None))
+
+    monkeypatch.setattr("ezllm.runtime.manager.uvicorn.run", fake_uvicorn_run)
+
+    manager.run_foreground()
+
+    assert len(calls) == 1
+    assert calls[0][2] == current_pid
+    assert calls[0][3] == "running"
+    assert calls[0][1]["host"] == "127.0.0.1"
+    assert calls[0][1]["port"] == 8888
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_does_not_treat_unrelated_live_process_without_started_at_as_owned(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=os.getpid(),
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=None,
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == []
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_treats_naive_started_at_as_non_match(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=os.getpid(),
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at="2026-04-24T12:34:56",
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == []
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_treats_legacy_background_child_without_started_at_as_owned(tmp_path, monkeypatch):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    class LegacyBackgroundProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def create_time(self):
+            return 1234.0
+
+        def cmdline(self):
+            return [
+                sys.executable,
+                "-c",
+                "from ezllm.config.loader import load_settings; from ezllm.runtime.manager import RuntimeManager; RuntimeManager(load_settings()).run_foreground()",
+            ]
+
+    monkeypatch.setattr("ezllm.runtime.manager.psutil.Process", LegacyBackgroundProcess)
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=None,
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == [(101, False)]
+    assert load_runtime_state(tmp_path) is None
 
 
 def test_runtime_manager_start_background_force_terminates_foreign_listeners(tmp_path, monkeypatch):
