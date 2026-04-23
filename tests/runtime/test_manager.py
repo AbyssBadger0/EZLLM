@@ -169,6 +169,38 @@ def test_runtime_manager_stop_ignores_stale_state_when_proxy_listener_is_differe
     assert load_runtime_state(tmp_path) is None
 
 
+def test_runtime_manager_stop_uses_persisted_proxy_port_when_config_drifted(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return {101} if port == 7777 else set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    settings = _settings(tmp_path)
+    settings.runtime.proxy_port = 8888
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=202,
+            proxy_port=7777,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+
+    manager = RuntimeManager(settings, platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert terminated == [(101, False)]
+    assert load_runtime_state(tmp_path) is None
+
+
 def test_runtime_manager_start_background_rejects_foreign_port_conflicts_without_force(
     tmp_path, monkeypatch
 ):
@@ -295,6 +327,47 @@ def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tm
     assert state is not None
     assert state.proxy_pid == 606
     assert state.status == "starting"
+
+
+def test_runtime_manager_start_background_detects_owned_instance_on_persisted_proxy_port_after_config_drift(
+    tmp_path, monkeypatch
+):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return {101} if port == 7777 else set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    settings = _settings(tmp_path)
+    settings.runtime.proxy_port = 8888
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=202,
+            proxy_port=7777,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.spawn_background",
+        lambda command: SimpleNamespace(pid=303),
+    )
+
+    manager = RuntimeManager(settings, platform_adapter=FakePlatformAdapter())
+
+    result = manager.start_background(force=False)
+    state = load_runtime_state(tmp_path)
+
+    assert "starting" in result.lower()
+    assert terminated == [(101, False)]
+    assert state is not None
+    assert state.proxy_pid == 303
+    assert state.proxy_port == 8888
 
 
 def test_runtime_manager_run_foreground_refuses_to_clobber_existing_running_state(tmp_path, monkeypatch):

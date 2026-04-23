@@ -43,7 +43,8 @@ class RuntimeManager:
         )
 
     def run_foreground(self) -> None:
-        listeners_by_port = self._listeners_by_port()
+        state = load_runtime_state(self.state_dir)
+        listeners_by_port = self._listeners_by_port(state)
         listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
         if listeners:
             raise RuntimeError("EZLLM proxy port is already in use.")
@@ -104,8 +105,9 @@ class RuntimeManager:
         return self._start_plan(force=force)[0]
 
     def _start_plan(self, *, force: bool = False) -> tuple[str, set[int], set[int]]:
-        owned_pids = self._owned_pids_from_state()
-        listeners_by_port = self._listeners_by_port()
+        state = load_runtime_state(self.state_dir)
+        owned_pids = self._owned_pids(state)
+        listeners_by_port = self._listeners_by_port(state)
         action = choose_port_conflict_action(
             requested_force=force,
             owned_pids=owned_pids,
@@ -153,15 +155,14 @@ class RuntimeManager:
             ),
         ]
 
-    def _listeners_by_port(self) -> dict[int, set[int]]:
+    def _listeners_by_port(self, state=None) -> dict[int, set[int]]:
+        ports = {self.settings.runtime.proxy_port}
+        if state is not None:
+            ports.add(state.proxy_port)
         return {
-            self.settings.runtime.proxy_port: self.platform_adapter.find_listening_pids(
-                self.settings.runtime.proxy_port
-            ),
+            port: self.platform_adapter.find_listening_pids(port)
+            for port in ports
         }
-
-    def _owned_pids_from_state(self) -> set[int]:
-        return self._owned_pids(load_runtime_state(self.state_dir))
 
     def _owned_pids(self, state) -> set[int]:
         if state is None:
@@ -172,7 +173,7 @@ class RuntimeManager:
         owned_pids = self._owned_pids(state)
         if not owned_pids:
             return set()
-        listeners_by_port = self._listeners_by_port()
+        listeners_by_port = self._listeners_by_port(state)
         listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
         return {pid for pid in owned_pids if pid in listeners}
 
