@@ -10,6 +10,7 @@ class RuntimeState(BaseModel):
     proxy_port: int
     llama_port: int
     status: str
+    started_at: str | None = None
 
 
 def save_runtime_state(state_dir: Path, state: RuntimeState) -> None:

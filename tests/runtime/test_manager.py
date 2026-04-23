@@ -21,6 +21,22 @@ def test_save_and_load_runtime_state(tmp_path):
     assert loaded.status == "running"
 
 
+def test_save_and_load_runtime_state_preserves_started_at(tmp_path):
+    state = RuntimeState(
+        proxy_pid=101,
+        llama_pid=202,
+        proxy_port=8888,
+        llama_port=8889,
+        status="running",
+        started_at="2026-04-24T12:34:56Z",
+    )
+
+    save_runtime_state(tmp_path, state)
+    loaded = load_runtime_state(tmp_path)
+
+    assert loaded.started_at == "2026-04-24T12:34:56Z"
+
+
 def test_load_runtime_state_returns_none_for_corrupt_json(tmp_path):
     tmp_path.joinpath("runtime.json").write_text("{not valid json", encoding="utf-8")
 

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 import ezllm.proxy.app as proxy_app
 import ezllm.runtime.health as runtime_health
 from ezllm.config.models import LlamaConfig, RuntimeConfig, Settings
+from ezllm.runtime.state import RuntimeState, save_runtime_state
 
 
 def _provider_summary() -> dict:
@@ -120,6 +121,33 @@ def test_healthz_restores_legacy_top_level_field_names(tmp_path):
     assert set(payload) == set(expected)
     assert payload["runtime"] == expected["runtime"]
     assert payload == expected
+
+
+def test_healthz_returns_persisted_started_at_when_runtime_state_exists(tmp_path):
+    settings = _build_settings(tmp_path)
+    save_runtime_state(
+        Path(settings.runtime.state_dir),
+        RuntimeState(
+            proxy_pid=321,
+            llama_pid=654,
+            proxy_port=settings.runtime.proxy_port,
+            llama_port=settings.runtime.llama_port,
+            status="running",
+            started_at="2026-04-24T12:34:56Z",
+        ),
+    )
+    client = TestClient(
+        proxy_app.build_app(
+            log_dir=tmp_path,
+            settings=settings,
+            provider_summary=_provider_summary(),
+        )
+    )
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json()["started_at"] == "2026-04-24T12:34:56Z"
 
 
 def test_legacy_model_file_name_handles_windows_style_paths_on_any_host():
