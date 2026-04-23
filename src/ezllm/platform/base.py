@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class PlatformAdapter(Protocol):
+    def find_listening_pids(self, port: int) -> set[int]: ...
+    def terminate_tree(self, pid: int, *, force: bool = False) -> None: ...
