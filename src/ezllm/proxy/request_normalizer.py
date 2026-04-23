@@ -24,15 +24,16 @@ def rewrite_request_model(request_json: dict | None, *, registry: ProviderRegist
     if not isinstance(request_json, dict):
         return request_json
 
-    model = get_request_model(request_json)
+    payload = dict(request_json)
+    model = get_request_model(payload)
     if model and registry.is_local_alias(model):
-        request_json["model"] = registry.local_model_name
-        return request_json
+        payload["model"] = registry.local_model_name
+        return payload
 
     family = registry.cloud_family_for(model)
     if family:
         rewritten_model = registry.model_for_family(family)
         if rewritten_model:
-            request_json["model"] = rewritten_model
+            payload["model"] = rewritten_model
 
-    return request_json
+    return payload

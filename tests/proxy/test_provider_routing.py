@@ -36,8 +36,9 @@ def test_rewrite_request_model_normalizes_local_alias_to_canonical_local_model()
 
     rewritten = rewrite_request_model(request_json, registry=registry)
 
+    assert rewritten is not request_json
     assert rewritten["model"] == "lm-local"
-    assert request_json["model"] == "lm-local"
+    assert request_json["model"] == "legacy-display"
 
 
 def test_registry_tracks_cloud_alias_family_and_active_provider_model():

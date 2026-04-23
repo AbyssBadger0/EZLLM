@@ -1,6 +1,24 @@
 import json
 
-from ezllm.logs.store import history_file_for, read_history_entries, save_raw_log
+from ezllm.logs.store import append_raw_log, history_file_for, read_all_logs, save_raw_log
+
+
+def test_append_raw_log_and_read_all_logs_round_trip_legacy_jsonl_entries(tmp_path):
+    history_file = history_file_for(tmp_path)
+    entry = {
+        "timestamp": "2026-04-24 00:00:00",
+        "duration_sec": 0.13,
+        "path": "/v1/chat/completions",
+        "upstream": "local:openai",
+        "request_raw": {"model": "lm-local", "messages": []},
+        "response_raw": {"reasoning": "", "content": "done"},
+    }
+
+    append_raw_log(history_file=history_file, entry=entry)
+
+    raw_entry = json.loads(history_file.read_text(encoding="utf-8").strip())
+    assert raw_entry == entry
+    assert read_all_logs(history_file) == [entry]
 
 
 def test_save_raw_log_persists_legacy_raw_request_and_response_keys(tmp_path):
@@ -27,7 +45,7 @@ def test_save_raw_log_persists_legacy_raw_request_and_response_keys(tmp_path):
     assert "request_raw" in raw_entry
     assert "response_raw" in raw_entry
 
-    entries = read_history_entries(history_file)
+    entries = read_all_logs(history_file)
     assert entries == [
         {
             "timestamp": "2026-04-24 00:00:00",

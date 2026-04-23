@@ -43,7 +43,7 @@ def sanitize_payload_for_log(value: Any):
     return value
 
 
-def append_history_entry(history_file: Path, entry: dict[str, Any]) -> Path:
+def append_raw_log(*, history_file: Path, entry: dict[str, Any]) -> Path:
     history_path = Path(history_file)
     history_path.parent.mkdir(parents=True, exist_ok=True)
     with history_path.open("a", encoding="utf-8") as handle:
@@ -51,7 +51,7 @@ def append_history_entry(history_file: Path, entry: dict[str, Any]) -> Path:
     return history_path
 
 
-def read_history_entries(history_file: Path) -> list[dict[str, Any]]:
+def read_all_logs(history_file: Path) -> list[dict[str, Any]]:
     history_path = Path(history_file)
     if not history_path.exists():
         return []
@@ -67,6 +67,14 @@ def read_history_entries(history_file: Path) -> list[dict[str, Any]]:
         if isinstance(entry, dict):
             entries.append(entry)
     return entries
+
+
+def append_history_entry(history_file: Path, entry: dict[str, Any]) -> Path:
+    return append_raw_log(history_file=history_file, entry=entry)
+
+
+def read_history_entries(history_file: Path) -> list[dict[str, Any]]:
+    return read_all_logs(history_file)
 
 
 def save_raw_log(
@@ -93,5 +101,5 @@ def save_raw_log(
             }
         ),
     }
-    append_history_entry(history_file_for(Path(log_dir)), entry)
+    append_raw_log(history_file=history_file_for(Path(log_dir)), entry=entry)
     return entry
