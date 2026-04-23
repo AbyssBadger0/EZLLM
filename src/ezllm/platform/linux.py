@@ -55,6 +55,11 @@ def ensure_linux_systemd() -> None:
         raise RuntimeError(LINUX_SYSTEMD_ONLY_MESSAGE)
 
 
+def _quote_systemd(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def render_service_unit(python_executable: str, config_path: str) -> str:
     return dedent(
         f"""\
@@ -64,8 +69,8 @@ def render_service_unit(python_executable: str, config_path: str) -> str:
 
         [Service]
         Type=simple
-        Environment=EZLLM_CONFIG={config_path}
-        ExecStart={python_executable} -m ezllm.cli run
+        Environment={_quote_systemd(f"EZLLM_CONFIG={config_path}")}
+        ExecStart={_quote_systemd(python_executable)} -m ezllm.cli run
         Restart=on-failure
 
         [Install]

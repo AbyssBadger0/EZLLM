@@ -112,3 +112,7 @@ def models_download(
             repo_type=repo_type,
         )
     )
+
+
+if __name__ == "__main__":
+    app()
