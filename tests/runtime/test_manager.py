@@ -109,7 +109,7 @@ def test_runtime_manager_format_status_reports_not_running(tmp_path):
     assert "not running" in manager.format_status().lower()
 
 
-def test_runtime_manager_stop_only_terminates_owned_pids_from_state(tmp_path):
+def test_runtime_manager_stop_only_terminates_owned_proxy_pid_from_state(tmp_path):
     terminated = []
 
     class FakePlatformAdapter:
@@ -135,7 +135,7 @@ def test_runtime_manager_stop_only_terminates_owned_pids_from_state(tmp_path):
     result = manager.stop()
 
     assert result == "EZLLM stopped"
-    assert set(terminated) == {(101, False), (202, False)}
+    assert set(terminated) == {(101, False)}
     assert load_runtime_state(tmp_path) is None
 
 
@@ -192,9 +192,36 @@ def test_runtime_manager_start_background_restarts_owned_port_conflicts(tmp_path
     state = load_runtime_state(tmp_path)
 
     assert "starting" in result.lower()
-    assert set(terminated) == {(101, False), (202, False)}
+    assert set(terminated) == {(101, False)}
     assert state is not None
     assert state.proxy_pid == 303
+    assert state.status == "starting"
+
+
+def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tmp_path, monkeypatch):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set() if port == 8888 else {505}
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.spawn_background",
+        lambda command: SimpleNamespace(pid=606),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.start_background(force=False)
+    state = load_runtime_state(tmp_path)
+
+    assert "starting" in result.lower()
+    assert terminated == []
+    assert state is not None
+    assert state.proxy_pid == 606
     assert state.status == "starting"
 
 
@@ -218,7 +245,7 @@ def test_runtime_manager_start_background_force_terminates_foreign_listeners(tmp
     manager.start_background(force=True)
     state = load_runtime_state(tmp_path)
 
-    assert set(terminated) == {(404, True), (505, True)}
+    assert set(terminated) == {(404, True)}
     assert state is not None
     assert state.proxy_pid == 606
     assert state.status == "starting"

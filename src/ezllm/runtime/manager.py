@@ -64,17 +64,9 @@ class RuntimeManager:
             self._clear_state()
 
     def start_background(self, *, force: bool = False) -> str:
+        action = self.ensure_startable(force=force)
         listeners_by_port = self._listeners_by_port()
         listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
-        owned_pids = self._owned_pids_from_state()
-        action = choose_port_conflict_action(
-            requested_force=force,
-            owned_pids=owned_pids,
-            listeners_by_port=listeners_by_port,
-        )
-
-        if action == "error":
-            raise RuntimeError("EZLLM ports are already in use by another process. Re-run with --force.")
         if action == "restart":
             self._terminate_pids(listeners, force=False)
             self._clear_state()
@@ -105,6 +97,16 @@ class RuntimeManager:
 
         self._clear_state()
         return "EZLLM stopped"
+
+    def ensure_startable(self, *, force: bool = False) -> str:
+        action = choose_port_conflict_action(
+            requested_force=force,
+            owned_pids=self._owned_pids_from_state(),
+            listeners_by_port=self._listeners_by_port(),
+        )
+        if action == "error":
+            raise RuntimeError("EZLLM ports are already in use by another process. Re-run with --force.")
+        return action
 
     def doctor_lines(self, *, config_path: str | Path | None = None) -> list[str]:
         runtime = self.settings.runtime
@@ -148,9 +150,6 @@ class RuntimeManager:
             self.settings.runtime.proxy_port: self.platform_adapter.find_listening_pids(
                 self.settings.runtime.proxy_port
             ),
-            self.settings.runtime.llama_port: self.platform_adapter.find_listening_pids(
-                self.settings.runtime.llama_port
-            ),
         }
 
     def _owned_pids_from_state(self) -> set[int]:
@@ -159,7 +158,7 @@ class RuntimeManager:
     def _owned_pids(self, state) -> set[int]:
         if state is None:
             return set()
-        return {pid for pid in (state.proxy_pid, state.llama_pid) if pid}
+        return {pid for pid in (state.proxy_pid,) if pid}
 
     def _terminate_pids(self, pids: set[int], *, force: bool) -> None:
         for pid in pids:

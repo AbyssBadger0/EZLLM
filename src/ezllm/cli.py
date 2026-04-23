@@ -42,6 +42,11 @@ def restart(
 ) -> None:
     """Restart EZLLM."""
     manager = RuntimeManager(load_settings())
+    try:
+        manager.ensure_startable(force=force)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
     typer.echo(manager.stop())
     try:
         typer.echo(manager.start_background(force=force))

@@ -146,6 +146,9 @@ def test_restart_accepts_force_flag(monkeypatch, tmp_path):
         def __init__(self, incoming_settings):
             called.append(("init", incoming_settings))
 
+        def ensure_startable(self, *, force=False):
+            called.append(("ensure_startable", force))
+
         def stop(self):
             called.append(("stop", None))
             return "EZLLM stopped"
@@ -163,6 +166,44 @@ def test_restart_accepts_force_flag(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert called == [
         ("init", settings),
+        ("ensure_startable", True),
         ("stop", None),
         ("start_background", True),
+    ]
+
+
+def test_restart_does_not_stop_healthy_instance_when_preflight_fails(monkeypatch, tmp_path):
+    called = []
+
+    settings = SimpleNamespace(
+        runtime=SimpleNamespace(state_dir=str(tmp_path), host="127.0.0.1", proxy_port=8888, llama_port=8889),
+        llama=SimpleNamespace(server_bin="llama-server", model_path="model.gguf"),
+    )
+
+    class FakeManager:
+        def __init__(self, incoming_settings):
+            called.append(("init", incoming_settings))
+
+        def ensure_startable(self, *, force=False):
+            called.append(("ensure_startable", force))
+            raise RuntimeError("port is busy")
+
+        def stop(self):
+            called.append(("stop", None))
+            return "EZLLM stopped"
+
+        def start_background(self, *, force=False):
+            called.append(("start_background", force))
+            return "EZLLM starting"
+
+    monkeypatch.setattr("ezllm.cli.load_settings", lambda: settings)
+    monkeypatch.setattr("ezllm.cli.RuntimeManager", FakeManager)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["restart"])
+
+    assert result.exit_code == 1
+    assert called == [
+        ("init", settings),
+        ("ensure_startable", False),
     ]
