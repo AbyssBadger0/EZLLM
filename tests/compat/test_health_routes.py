@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import ezllm.proxy.app as proxy_app
+import ezllm.runtime.health as runtime_health
 from ezllm.config.models import LlamaConfig, RuntimeConfig, Settings
 
 
@@ -22,30 +23,93 @@ def _build_settings(tmp_path: Path) -> Settings:
     )
 
 
-def _build_client(tmp_path: Path, monkeypatch) -> TestClient:
-    monkeypatch.setattr(proxy_app, "load_settings", lambda: _build_settings(tmp_path), raising=False)
-    return TestClient(proxy_app.build_app(log_dir=tmp_path))
+def _build_client(tmp_path: Path, provider_summary: dict | None = None) -> TestClient:
+    return TestClient(
+        proxy_app.build_app(
+            log_dir=tmp_path,
+            settings=_build_settings(tmp_path),
+            provider_summary=provider_summary,
+        )
+    )
 
 
-def test_runtime_config_returns_legacy_named_sections(tmp_path, monkeypatch):
-    client = _build_client(tmp_path, monkeypatch)
+def test_runtime_config_restores_legacy_runtime_contract(tmp_path):
+    client = _build_client(
+        tmp_path,
+        provider_summary={
+            "provider": "openai",
+            "base_url": "https://api.example.test/v1",
+            "api_key_configured": True,
+            "upstream_model_name": "gpt-4.1-mini",
+            "ignored": "not-part-of-legacy-shape",
+        },
+    )
 
     response = client.get("/runtime-config")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["display_model_name"] == "legacy-model.gguf"
-    assert {"display_model_name", "proxy", "llama", "cloud", "logs"} <= payload.keys()
+    assert payload["proxy"] == {
+        "url": "http://127.0.0.1:8890",
+        "host": "127.0.0.1",
+        "port": 8890,
+        "healthz": "http://127.0.0.1:8890/healthz",
+        "logs_page": "http://127.0.0.1:8890/logs",
+    }
+    assert payload["llama"] == {
+        "url": "http://127.0.0.1:8891",
+        "port": 8891,
+        "binary": "llama-server",
+        "model_path": r"C:\models\legacy-model.gguf",
+        "model_file": "legacy-model.gguf",
+        "ctx_size": 32768,
+        "n_predict": 4096,
+    }
+    assert payload["cloud"] == {
+        "provider": "openai",
+        "base_url": "https://api.example.test/v1",
+        "api_key_configured": True,
+        "local_model_name": "legacy-model.gguf",
+        "upstream_model_name": "gpt-4.1-mini",
+    }
+    assert payload["logs"] == {
+        "dir": str(tmp_path),
+        "history": str(tmp_path / "chat_history.jsonl"),
+    }
 
 
-def test_healthz_returns_legacy_health_fields(tmp_path, monkeypatch):
-    client = _build_client(tmp_path, monkeypatch)
+def test_healthz_restores_legacy_top_level_field_names(tmp_path):
+    client = _build_client(
+        tmp_path,
+        provider_summary={
+            "provider": "openai",
+            "base_url": "https://api.example.test/v1",
+            "api_key_configured": True,
+            "upstream_model_name": "gpt-4.1-mini",
+        },
+    )
 
     response = client.get("/healthz")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["proxy"] == "ok"
+    assert payload["started_at"] is None
+    assert payload["llama_port"] == 8891
+    assert payload["proxy_port"] == 8890
+    assert payload["display_model_name"] == "legacy-model.gguf"
+    assert payload["local_model_name"] == "legacy-model.gguf"
+    assert payload["upstream_model_name"] == "gpt-4.1-mini"
     assert payload["runtime"]["display_model_name"] == "legacy-model.gguf"
     assert payload["pids"] == {"proxy": None, "llama": None}
-    assert payload["proxy_port"] == 8890
+    assert payload["llama_status"] == "not-running"
+    assert "llama" not in payload
+
+
+def test_legacy_model_file_name_handles_windows_style_paths_on_any_host():
+    helper = getattr(runtime_health, "legacy_model_file_name", None)
+
+    assert callable(helper)
+    assert helper(r"C:\models\legacy-model.gguf") == "legacy-model.gguf"
+    assert helper("/models/legacy-model.gguf") == "legacy-model.gguf"

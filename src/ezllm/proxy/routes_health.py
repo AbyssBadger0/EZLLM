@@ -17,6 +17,7 @@ def build_health_router(
     proxy_pid: int | None = None,
     llama_pid: int | None = None,
     llama_status: str | None = None,
+    started_at: str | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -30,6 +31,7 @@ def build_health_router(
             proxy_pid=proxy_pid if proxy_pid is not None else runtime_summary["proxy_pid"],
             llama_pid=llama_pid if llama_pid is not None else runtime_summary["llama_pid"],
             llama_status=llama_status if llama_status is not None else runtime_summary["llama_status"],
+            started_at=started_at if started_at is not None else runtime_summary["started_at"],
         )
 
     return router
