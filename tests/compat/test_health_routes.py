@@ -7,6 +7,15 @@ import ezllm.runtime.health as runtime_health
 from ezllm.config.models import LlamaConfig, RuntimeConfig, Settings
 
 
+def _provider_summary() -> dict:
+    return {
+        "provider": "openai",
+        "base_url": "https://api.example.test/v1",
+        "api_key_configured": True,
+        "upstream_model_name": "gpt-4.1-mini",
+    }
+
+
 def _build_settings(tmp_path: Path) -> Settings:
     return Settings(
         runtime=RuntimeConfig(
@@ -33,14 +42,44 @@ def _build_client(tmp_path: Path, provider_summary: dict | None = None) -> TestC
     )
 
 
+def _expected_runtime_payload(tmp_path: Path) -> dict:
+    return {
+        "display_model_name": "legacy-model.gguf",
+        "proxy": {
+            "url": "http://127.0.0.1:8890",
+            "host": "127.0.0.1",
+            "port": 8890,
+            "healthz": "http://127.0.0.1:8890/healthz",
+            "logs_page": "http://127.0.0.1:8890/logs",
+        },
+        "llama": {
+            "url": "http://127.0.0.1:8891",
+            "port": 8891,
+            "binary": "llama-server",
+            "model_path": r"C:\models\legacy-model.gguf",
+            "model_file": "legacy-model.gguf",
+            "ctx_size": 32768,
+            "n_predict": 4096,
+        },
+        "cloud": {
+            "provider": "openai",
+            "base_url": "https://api.example.test/v1",
+            "api_key_configured": True,
+            "local_model_name": "legacy-model.gguf",
+            "upstream_model_name": "gpt-4.1-mini",
+        },
+        "logs": {
+            "dir": str(tmp_path),
+            "history": str(tmp_path / "chat_history.jsonl"),
+        },
+    }
+
+
 def test_runtime_config_restores_legacy_runtime_contract(tmp_path):
     client = _build_client(
         tmp_path,
         provider_summary={
-            "provider": "openai",
-            "base_url": "https://api.example.test/v1",
-            "api_key_configured": True,
-            "upstream_model_name": "gpt-4.1-mini",
+            **_provider_summary(),
             "ignored": "not-part-of-legacy-shape",
         },
     )
@@ -49,62 +88,38 @@ def test_runtime_config_restores_legacy_runtime_contract(tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["display_model_name"] == "legacy-model.gguf"
-    assert payload["proxy"] == {
-        "url": "http://127.0.0.1:8890",
-        "host": "127.0.0.1",
-        "port": 8890,
-        "healthz": "http://127.0.0.1:8890/healthz",
-        "logs_page": "http://127.0.0.1:8890/logs",
-    }
-    assert payload["llama"] == {
-        "url": "http://127.0.0.1:8891",
-        "port": 8891,
-        "binary": "llama-server",
-        "model_path": r"C:\models\legacy-model.gguf",
-        "model_file": "legacy-model.gguf",
-        "ctx_size": 32768,
-        "n_predict": 4096,
-    }
-    assert payload["cloud"] == {
-        "provider": "openai",
-        "base_url": "https://api.example.test/v1",
-        "api_key_configured": True,
-        "local_model_name": "legacy-model.gguf",
-        "upstream_model_name": "gpt-4.1-mini",
-    }
-    assert payload["logs"] == {
-        "dir": str(tmp_path),
-        "history": str(tmp_path / "chat_history.jsonl"),
-    }
+    expected = _expected_runtime_payload(tmp_path)
+
+    assert set(payload) == set(expected)
+    assert payload == expected
 
 
 def test_healthz_restores_legacy_top_level_field_names(tmp_path):
     client = _build_client(
         tmp_path,
-        provider_summary={
-            "provider": "openai",
-            "base_url": "https://api.example.test/v1",
-            "api_key_configured": True,
-            "upstream_model_name": "gpt-4.1-mini",
-        },
+        provider_summary=_provider_summary(),
     )
 
     response = client.get("/healthz")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["proxy"] == "ok"
-    assert payload["started_at"] is None
-    assert payload["llama_port"] == 8891
-    assert payload["proxy_port"] == 8890
-    assert payload["display_model_name"] == "legacy-model.gguf"
-    assert payload["local_model_name"] == "legacy-model.gguf"
-    assert payload["upstream_model_name"] == "gpt-4.1-mini"
-    assert payload["runtime"]["display_model_name"] == "legacy-model.gguf"
-    assert payload["pids"] == {"proxy": None, "llama": None}
-    assert payload["llama_status"] == "not-running"
-    assert "llama" not in payload
+    expected = {
+        "proxy": "ok",
+        "started_at": None,
+        "llama_port": 8891,
+        "proxy_port": 8890,
+        "display_model_name": "legacy-model.gguf",
+        "local_model_name": "legacy-model.gguf",
+        "upstream_model_name": "gpt-4.1-mini",
+        "runtime": _expected_runtime_payload(tmp_path),
+        "pids": {"proxy": None, "llama": None},
+        "llama_status": "not-running",
+    }
+
+    assert set(payload) == set(expected)
+    assert payload["runtime"] == expected["runtime"]
+    assert payload == expected
 
 
 def test_legacy_model_file_name_handles_windows_style_paths_on_any_host():
