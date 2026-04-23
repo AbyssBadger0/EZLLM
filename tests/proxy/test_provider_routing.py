@@ -48,6 +48,30 @@ def test_registry_tracks_cloud_alias_family_and_active_provider_model():
     assert registry.model_for_family("sonnet") == "anthropic/claude-sonnet-4.5"
 
 
+def test_registry_maps_legacy_native_model_ids_to_cloud_family():
+    settings = SimpleNamespace(
+        proxy=SimpleNamespace(local_model_name="lm-local"),
+        llama=SimpleNamespace(model_path=r"C:\models\display-model.gguf"),
+        aliases=SimpleNamespace(
+            local=[],
+            cloud={"or-sonnet": "sonnet"},
+            native={"sonnet": "claude-sonnet-4-6"},
+        ),
+        providers=AttrDict(
+            active="or",
+            **{
+                "or": {
+                    "models": {"sonnet": "anthropic/claude-sonnet-4.6"},
+                }
+            },
+        ),
+    )
+
+    registry = build_provider_registry(settings)
+
+    assert registry.cloud_family_for("claude-sonnet-4-6") == "sonnet"
+
+
 def test_openrouter_registry_uses_legacy_default_base_and_strips_model_prefix():
     settings = SimpleNamespace(
         proxy=SimpleNamespace(local_model_name="lm-local"),
@@ -98,3 +122,39 @@ def test_registry_resolves_legacy_sub2_provider_aliases_for_active_provider():
         assert registry.active_provider is not None
         assert registry.active_provider.base_url == "https://sub2.example.test"
         assert registry.model_for_family("sonnet") == "claude-sonnet-4.6"
+
+
+def test_registry_falls_back_to_openrouter_for_missing_or_invalid_active_provider():
+    scenarios = [
+        AttrDict(
+            **{
+                "or": {
+                    "base_url": "https://openrouter.example.test/api",
+                    "models": {"sonnet": "anthropic/claude-sonnet-4.6"},
+                }
+            }
+        ),
+        AttrDict(
+            active="misspelled-provider",
+            **{
+                "openrouter": {
+                    "base_url": "https://openrouter.example.test/api",
+                    "models": {"sonnet": "anthropic/claude-sonnet-4.6"},
+                }
+            },
+        ),
+    ]
+
+    for providers in scenarios:
+        settings = SimpleNamespace(
+            proxy=SimpleNamespace(local_model_name="lm-local"),
+            llama=SimpleNamespace(model_path=r"C:\models\display-model.gguf"),
+            aliases=SimpleNamespace(local=[], cloud={}),
+            providers=providers,
+        )
+
+        registry = build_provider_registry(settings)
+
+        assert registry.active_provider is not None
+        assert registry.active_provider.name in {"or", "openrouter"}
+        assert registry.model_for_family("sonnet") == "anthropic/claude-sonnet-4.6"

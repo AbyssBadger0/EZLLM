@@ -105,6 +105,9 @@ def _build_local_aliases(settings: Any, canonical_local_model: str) -> tuple[str
 def _build_cloud_alias_map(settings: Any, providers: dict[str, "ProviderConfig"]) -> dict[str, str]:
     alias_settings = _get_value(settings, "aliases")
     cloud_aliases = _get_value(alias_settings, "cloud", {})
+    native_models = _get_value(alias_settings, "native", None)
+    if native_models is None:
+        native_models = _get_value(alias_settings, "native_models", {})
     alias_map: dict[str, str] = {}
 
     if isinstance(cloud_aliases, dict):
@@ -126,6 +129,14 @@ def _build_cloud_alias_map(settings: Any, providers: dict[str, "ProviderConfig"]
 
             if family:
                 alias_map[key_text.lower()] = family.lower()
+
+    if isinstance(native_models, dict):
+        for family, value in native_models.items():
+            family_name = str(family).strip().lower()
+            if not family_name:
+                continue
+            for native_model in _coerce_names(value):
+                alias_map[native_model.lower()] = family_name
 
     for provider in providers.values():
         for family, model_name in provider.models.items():
@@ -180,8 +191,10 @@ class ProviderRegistry:
 
 
 def _resolve_active_provider_name(active_provider_name: str | None, providers: dict[str, ProviderConfig]) -> str | None:
+    openrouter_provider_name = next((name for name in providers if name.lower() in OPENROUTER_NAMES), None)
+
     if not active_provider_name:
-        return None
+        return openrouter_provider_name
     if active_provider_name in providers:
         return active_provider_name
 
@@ -200,7 +213,7 @@ def _resolve_active_provider_name(active_provider_name: str | None, providers: d
             if name.lower() in SUB2_NAMES:
                 return name
 
-    return active_provider_name
+    return openrouter_provider_name
 
 
 def build_provider_registry(settings: Any) -> ProviderRegistry:
