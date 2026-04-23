@@ -1,4 +1,8 @@
+import platform
+
 import psutil
+
+LINUX_SYSTEMD_ONLY_MESSAGE = "EZLLM service commands are linux/systemd only."
 
 
 class LinuxPlatformAdapter:
@@ -41,3 +45,8 @@ class LinuxPlatformAdapter:
                 continue
 
         psutil.wait_procs(alive, timeout=3)
+
+
+def ensure_linux_systemd() -> None:
+    if platform.system().lower() != "linux":
+        raise RuntimeError(LINUX_SYSTEMD_ONLY_MESSAGE)
