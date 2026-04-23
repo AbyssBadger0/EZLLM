@@ -175,7 +175,7 @@ def project_log_entry(entry: dict) -> dict:
 
 def paginate_entries(lines: list[str], *, page: int, size: int) -> dict:
     total = len(lines)
-    pages = math.ceil(total / size) if total and size else 0
+    pages = math.ceil(total / size) if total else 0
     start = (page - 1) * size
     end = start + size
     entries = []
