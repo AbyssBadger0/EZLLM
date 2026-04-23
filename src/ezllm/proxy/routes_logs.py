@@ -17,8 +17,8 @@ def build_logs_router(history_file: Path) -> APIRouter:
 
     @router.get("/api/logs")
     def api_logs(page: int = Query(1), size: int = Query(10)) -> dict:
-        entries = read_log_entries(history_file)
-        payload = paginate_entries(entries, page=page, size=size)
+        lines, _ = read_log_entries(history_file)
+        payload = paginate_entries(lines, page=page, size=size)
         return to_legacy_logs_payload(payload)
 
     return router
