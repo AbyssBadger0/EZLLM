@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-KNOWN_NAMES = {"sub2"}
+KNOWN_NAMES = {"cc", "sub2", "sub2api"}
 
 
 def normalize_provider_config(config: Any, *, name: str = "sub2") -> dict[str, Any]:
