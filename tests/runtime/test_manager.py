@@ -43,6 +43,12 @@ def test_load_runtime_state_returns_none_for_corrupt_json(tmp_path):
     assert load_runtime_state(tmp_path) is None
 
 
+def test_load_runtime_state_returns_none_for_invalid_utf8(tmp_path):
+    tmp_path.joinpath("runtime.json").write_bytes(b"\xff\xfe\xfa")
+
+    assert load_runtime_state(tmp_path) is None
+
+
 def test_runtime_manager_format_status_reports_running_state(tmp_path):
     settings = SimpleNamespace(
         runtime=SimpleNamespace(state_dir=str(tmp_path), proxy_port=8888, llama_port=8889),

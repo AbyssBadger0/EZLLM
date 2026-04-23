@@ -28,5 +28,5 @@ def load_runtime_state(state_dir: Path) -> RuntimeState | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return RuntimeState.model_validate(data)
-    except (json.JSONDecodeError, ValidationError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, OSError):
         return None
