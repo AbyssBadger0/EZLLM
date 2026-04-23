@@ -1,6 +1,8 @@
 import os
+import re
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 from .defaults import default_config_path, default_log_dir, default_state_dir
 from .models import Settings
@@ -13,8 +15,8 @@ def _config_path() -> Path:
     return default_config_path()
 
 
-def load_settings() -> Settings:
-    payload = {
+def _base_payload() -> dict[str, dict]:
+    return {
         "runtime": {
             "host": "127.0.0.1",
             "proxy_port": 8888,
@@ -24,6 +26,10 @@ def load_settings() -> Settings:
         },
         "llama": {},
     }
+
+
+def _load_payload() -> dict[str, dict]:
+    payload = _base_payload()
     path = _config_path()
     if path.exists():
         with path.open("rb") as handle:
@@ -42,4 +48,59 @@ def load_settings() -> Settings:
     if os.environ.get("EZLLM_MODEL_PATH"):
         llama["model_path"] = os.environ["EZLLM_MODEL_PATH"]
 
-    return Settings.model_validate(payload)
+    return payload
+
+
+def load_settings() -> Settings:
+    return Settings.model_validate(_load_payload())
+
+
+def load_runtime_settings():
+    payload = _load_payload()
+    runtime = SimpleNamespace(**payload["runtime"])
+    llama = SimpleNamespace(**payload.get("llama", {}))
+    return SimpleNamespace(runtime=runtime, llama=llama)
+
+
+def _insert_or_replace_active_value(section_text: str, provider_name: str) -> str:
+    active_line = f'active = "{provider_name}"'
+    active_pattern = re.compile(r'(?m)^(?P<indent>\s*)active\s*=\s*.*$')
+    match = active_pattern.search(section_text)
+    if match:
+        indent = match.group("indent")
+        return active_pattern.sub(f"{indent}{active_line}", section_text, count=1)
+    prefix = "" if section_text.endswith("\n") else "\n"
+    return f"{section_text}{prefix}{active_line}\n"
+
+
+def set_active_provider(name: str) -> Path:
+    provider_name = name.strip()
+    if not provider_name:
+        raise ValueError("provider name must not be empty")
+
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+
+    section_header = "[providers]"
+    section_start = text.find(section_header)
+    if section_start != -1:
+        section_body_start = section_start + len(section_header)
+        next_header_match = re.search(r"(?m)^\[[^\]]+\]\s*$", text[section_body_start:])
+        section_end = section_body_start + next_header_match.start() if next_header_match else len(text)
+        updated_section = _insert_or_replace_active_value(text[section_start:section_end], provider_name)
+        updated_text = f"{text[:section_start]}{updated_section}{text[section_end:]}"
+    else:
+        descendant_match = re.search(r"(?m)^\[providers\.[^\]]+\]\s*$", text)
+        block = f'{section_header}\nactive = "{provider_name}"\n'
+        if descendant_match:
+            prefix = "" if descendant_match.start() == 0 or text[descendant_match.start() - 1] == "\n" else "\n"
+            updated_text = f"{text[:descendant_match.start()]}{prefix}{block}\n{text[descendant_match.start():]}"
+        elif text.strip():
+            suffix = "" if text.endswith("\n") else "\n"
+            updated_text = f"{text}{suffix}\n{block}"
+        else:
+            updated_text = block
+
+    path.write_text(updated_text, encoding="utf-8")
+    return path
