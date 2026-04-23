@@ -2,7 +2,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from .defaults import default_log_dir, default_state_dir
+from .defaults import default_config_path, default_log_dir, default_state_dir
 from .models import Settings
 
 
@@ -10,7 +10,7 @@ def _config_path() -> Path:
     env_path = os.environ.get("EZLLM_CONFIG")
     if env_path:
         return Path(env_path).expanduser()
-    return Path.home() / ".config" / "ezllm" / "config.toml"
+    return default_config_path()
 
 
 def load_settings() -> Settings:

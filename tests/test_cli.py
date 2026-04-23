@@ -1,7 +1,11 @@
-import importlib
+from typer.testing import CliRunner
+
+from ezllm.cli import app
 
 
-def test_cli_module_exposes_app():
-    module = importlib.import_module("ezllm.cli")
+def test_cli_app_runs():
+    runner = CliRunner()
 
-    assert hasattr(module, "app")
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
