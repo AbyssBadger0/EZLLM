@@ -198,6 +198,48 @@ def test_runtime_manager_start_background_restarts_owned_port_conflicts(tmp_path
     assert state.status == "starting"
 
 
+def test_runtime_manager_start_background_restart_does_not_kill_foreign_listener_after_churn(
+    tmp_path, monkeypatch
+):
+    terminated = []
+    lookup_count = {8888: 0}
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            lookup_count[port] = lookup_count.get(port, 0) + 1
+            if port == 8888 and lookup_count[port] == 1:
+                return {101}
+            return {999}
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=202,
+            proxy_port=8888,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.spawn_background",
+        lambda command: SimpleNamespace(pid=303),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.start_background(force=False)
+    state = load_runtime_state(tmp_path)
+
+    assert "starting" in result.lower()
+    assert terminated == [(101, False)]
+    assert state is not None
+    assert state.proxy_pid == 303
+
+
 def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tmp_path, monkeypatch):
     terminated = []
 

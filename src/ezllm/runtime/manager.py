@@ -64,11 +64,9 @@ class RuntimeManager:
             self._clear_state()
 
     def start_background(self, *, force: bool = False) -> str:
-        action = self.ensure_startable(force=force)
-        listeners_by_port = self._listeners_by_port()
-        listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
+        action, owned_pids, listeners = self._start_plan(force=force)
         if action == "restart":
-            self._terminate_pids(listeners, force=False)
+            self._terminate_pids(owned_pids, force=False)
             self._clear_state()
         elif action == "force":
             self._terminate_pids(listeners, force=True)
@@ -99,14 +97,20 @@ class RuntimeManager:
         return "EZLLM stopped"
 
     def ensure_startable(self, *, force: bool = False) -> str:
+        return self._start_plan(force=force)[0]
+
+    def _start_plan(self, *, force: bool = False) -> tuple[str, set[int], set[int]]:
+        owned_pids = self._owned_pids_from_state()
+        listeners_by_port = self._listeners_by_port()
         action = choose_port_conflict_action(
             requested_force=force,
-            owned_pids=self._owned_pids_from_state(),
-            listeners_by_port=self._listeners_by_port(),
+            owned_pids=owned_pids,
+            listeners_by_port=listeners_by_port,
         )
         if action == "error":
             raise RuntimeError("EZLLM ports are already in use by another process. Re-run with --force.")
-        return action
+        listeners = set().union(*listeners_by_port.values()) if listeners_by_port else set()
+        return action, owned_pids, listeners
 
     def doctor_lines(self, *, config_path: str | Path | None = None) -> list[str]:
         runtime = self.settings.runtime
