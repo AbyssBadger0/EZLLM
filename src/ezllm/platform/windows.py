@@ -15,7 +15,10 @@ class WindowsPlatformAdapter:
         except psutil.NoSuchProcess:
             return
 
-        processes = [*proc.children(recursive=True), proc]
+        try:
+            processes = [*proc.children(recursive=True), proc]
+        except psutil.NoSuchProcess:
+            return
         alive = []
 
         for process in processes:

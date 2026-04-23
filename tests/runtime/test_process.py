@@ -33,3 +33,15 @@ def test_linux_terminate_tree_ignores_missing_process(monkeypatch):
     monkeypatch.setattr("ezllm.platform.linux.psutil.Process", raise_missing_process)
 
     adapter.terminate_tree(1234)
+
+
+def test_linux_terminate_tree_ignores_missing_process_during_child_enumeration(monkeypatch):
+    adapter = LinuxPlatformAdapter()
+
+    class DummyProcess:
+        def children(self, recursive):
+            raise linux_platform.psutil.NoSuchProcess(1234)
+
+    monkeypatch.setattr("ezllm.platform.linux.psutil.Process", lambda pid: DummyProcess())
+
+    adapter.terminate_tree(1234)
