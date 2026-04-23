@@ -41,29 +41,32 @@ def extract_content(content) -> str:
 
 
 def parse_openai_payload_for_log(payload: dict, reasoning_parts: list[str], content_parts: list[str]) -> None:
-    choices = payload.get("choices", [])
-    if not choices:
-        return
+    try:
+        choices = payload.get("choices", [])
+        if not choices:
+            return
 
-    choice = choices[0]
-    delta = choice.get("delta")
-    if isinstance(delta, dict):
-        reasoning = delta.get("reasoning_content")
-        content = delta.get("content")
-        if reasoning:
-            reasoning_parts.append(normalize_text_piece(reasoning))
-        if content:
-            content_parts.append(normalize_text_piece(content))
-        return
+        choice = choices[0]
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            reasoning = delta.get("reasoning_content")
+            content = delta.get("content")
+            if reasoning:
+                reasoning_parts.append(normalize_text_piece(reasoning))
+            if content:
+                content_parts.append(normalize_text_piece(content))
+            return
 
-    message = choice.get("message")
-    if isinstance(message, dict):
-        reasoning = message.get("reasoning_content")
-        content = message.get("content")
-        if reasoning:
-            reasoning_parts.append(normalize_text_piece(reasoning))
-        if content:
-            content_parts.append(extract_content(content))
+        message = choice.get("message")
+        if isinstance(message, dict):
+            reasoning = message.get("reasoning_content")
+            content = message.get("content")
+            if reasoning:
+                reasoning_parts.append(normalize_text_piece(reasoning))
+            if content:
+                content_parts.append(extract_content(content))
+    except Exception:
+        return
 
 
 def parse_anthropic_block_for_log(block: dict, reasoning_parts: list[str], content_parts: list[str]) -> None:

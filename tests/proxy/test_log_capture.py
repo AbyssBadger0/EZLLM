@@ -1,6 +1,7 @@
 import json
 
 from ezllm.logs.store import append_raw_log, history_file_for, read_all_logs, save_raw_log
+from ezllm.proxy.response_normalizer import parse_openai_payload_for_log
 
 
 def test_append_raw_log_and_read_all_logs_round_trip_legacy_jsonl_entries(tmp_path):
@@ -59,3 +60,17 @@ def test_save_raw_log_persists_legacy_raw_request_and_response_keys(tmp_path):
             },
         }
     ]
+
+
+def test_parse_openai_payload_for_log_ignores_malformed_json_shapes_without_raising():
+    reasoning_parts: list[str] = []
+    content_parts: list[str] = []
+
+    parse_openai_payload_for_log(
+        {"choices": [None]},
+        reasoning_parts,
+        content_parts,
+    )
+
+    assert reasoning_parts == []
+    assert content_parts == []
