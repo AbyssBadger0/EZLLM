@@ -1,8 +1,11 @@
 import platform
+from pathlib import Path
+from textwrap import dedent
 
 import psutil
 
 LINUX_SYSTEMD_ONLY_MESSAGE = "EZLLM service commands are linux/systemd only."
+SYSTEMD_RUNTIME_DIR = Path("/run/systemd/system")
 
 
 class LinuxPlatformAdapter:
@@ -48,5 +51,24 @@ class LinuxPlatformAdapter:
 
 
 def ensure_linux_systemd() -> None:
-    if platform.system().lower() != "linux":
+    if platform.system().lower() != "linux" or not SYSTEMD_RUNTIME_DIR.is_dir():
         raise RuntimeError(LINUX_SYSTEMD_ONLY_MESSAGE)
+
+
+def render_service_unit(python_executable: str, config_path: str) -> str:
+    return dedent(
+        f"""\
+        [Unit]
+        Description=EZLLM local runtime
+        After=network.target
+
+        [Service]
+        Type=simple
+        Environment=EZLLM_CONFIG={config_path}
+        ExecStart={python_executable} -m ezllm.cli run
+        Restart=on-failure
+
+        [Install]
+        WantedBy=multi-user.target
+        """
+    )

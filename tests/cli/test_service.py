@@ -3,13 +3,12 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from ezllm.cli import app
+from ezllm.platform.linux import render_service_unit
 
 
-def test_service_status_rejects_non_linux(monkeypatch):
-    def fake_ensure_linux_systemd():
-        raise RuntimeError("linux/systemd only")
-
-    monkeypatch.setattr("ezllm.cli.ensure_linux_systemd", fake_ensure_linux_systemd)
+def test_service_status_rejects_non_linux(monkeypatch, tmp_path):
+    monkeypatch.setattr("ezllm.platform.linux.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("ezllm.platform.linux.SYSTEMD_RUNTIME_DIR", tmp_path / "systemd")
 
     result = CliRunner().invoke(app, ["service", "status"])
 
@@ -18,8 +17,22 @@ def test_service_status_rejects_non_linux(monkeypatch):
     assert "linux/systemd only" in output
 
 
-def test_service_status_reports_linux_availability(monkeypatch):
-    monkeypatch.setattr("ezllm.cli.ensure_linux_systemd", lambda: None)
+def test_service_status_rejects_linux_without_systemd(monkeypatch, tmp_path):
+    monkeypatch.setattr("ezllm.platform.linux.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ezllm.platform.linux.SYSTEMD_RUNTIME_DIR", tmp_path / "systemd")
+
+    result = CliRunner().invoke(app, ["service", "status"])
+
+    assert result.exit_code == 1
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    assert "linux/systemd only" in output
+
+
+def test_service_status_reports_linux_availability(monkeypatch, tmp_path):
+    runtime_dir = tmp_path / "systemd"
+    runtime_dir.mkdir()
+    monkeypatch.setattr("ezllm.platform.linux.platform.system", lambda: "Linux")
+    monkeypatch.setattr("ezllm.platform.linux.SYSTEMD_RUNTIME_DIR", runtime_dir)
 
     result = CliRunner().invoke(app, ["service", "status"])
 
@@ -66,6 +79,14 @@ def test_models_download_calls_downloader_and_prints_saved_path(monkeypatch, tmp
         "repo_type": "model",
     }
     assert str(saved_path) in result.stdout
+
+
+def test_render_service_unit_contains_expected_systemd_fields():
+    unit = render_service_unit("/usr/bin/python3", "/etc/ezllm/config.toml")
+
+    assert "ExecStart=/usr/bin/python3 -m ezllm.cli run" in unit
+    assert "Environment=EZLLM_CONFIG=/etc/ezllm/config.toml" in unit
+    assert "WantedBy=multi-user.target" in unit
 
 
 def test_console_script_aliases_include_lm():
