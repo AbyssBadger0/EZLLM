@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ezllm.providers.openrouter import KNOWN_NAMES as OPENROUTER_NAMES
@@ -55,6 +55,22 @@ def _dedupe_preserving_order(values: list[str]) -> tuple[str, ...]:
     return tuple(ordered)
 
 
+def _model_file_name(model_path: str | Path) -> str:
+    normalized = str(model_path).rstrip("\\/")
+    if not normalized:
+        return ""
+
+    candidates = []
+    for candidate in (PureWindowsPath(normalized).name, PurePosixPath(normalized).name):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if "/" not in candidate and "\\" not in candidate:
+            return candidate
+    return candidates[0] if candidates else normalized
+
+
 def _normalize_provider(name: str, config: Any) -> "ProviderConfig":
     normalized_name = (name or "").strip()
     config_mapping = _as_mapping(config)
@@ -95,7 +111,7 @@ def _build_local_aliases(settings: Any, canonical_local_model: str) -> tuple[str
     llama = _get_value(settings, "llama")
     model_path = _get_value(llama, "model_path", "")
     if model_path:
-        aliases.append(Path(model_path).name)
+        aliases.append(_model_file_name(model_path))
 
     alias_settings = _get_value(settings, "aliases")
     aliases.extend(_coerce_names(_get_value(alias_settings, "local", [])))
@@ -189,6 +205,12 @@ class ProviderRegistry:
             return None
         return provider.models.get(normalized)
 
+    def rewrite_target_for_model(self, model: str) -> str | None:
+        family = self.cloud_family_for(model)
+        if family is None:
+            return None
+        return self.model_for_family(family)
+
 
 def _resolve_active_provider_name(active_provider_name: str | None, providers: dict[str, ProviderConfig]) -> str | None:
     openrouter_provider_name = next((name for name in providers if name.lower() in OPENROUTER_NAMES), None)
@@ -229,7 +251,7 @@ def build_provider_registry(settings: Any) -> ProviderRegistry:
     if not local_model_name:
         llama = _get_value(settings, "llama")
         model_path = str(_get_value(llama, "model_path", "") or "").strip()
-        local_model_name = Path(model_path).name if model_path else ""
+        local_model_name = _model_file_name(model_path) if model_path else ""
 
     return ProviderRegistry(
         local_model_name=local_model_name,

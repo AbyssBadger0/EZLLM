@@ -17,7 +17,7 @@ def should_route_to_local(request_json: dict | None, *, registry: ProviderRegist
 
 def should_route_to_cloud(request_json: dict | None, *, registry: ProviderRegistry) -> bool:
     model = get_request_model(request_json)
-    return registry.cloud_family_for(model) is not None
+    return registry.rewrite_target_for_model(model) is not None
 
 
 def rewrite_request_model(request_json: dict | None, *, registry: ProviderRegistry) -> dict | None:
@@ -30,10 +30,8 @@ def rewrite_request_model(request_json: dict | None, *, registry: ProviderRegist
         payload["model"] = registry.local_model_name
         return payload
 
-    family = registry.cloud_family_for(model)
-    if family:
-        rewritten_model = registry.model_for_family(family)
-        if rewritten_model:
-            payload["model"] = rewritten_model
+    rewritten_model = registry.rewrite_target_for_model(model)
+    if rewritten_model:
+        payload["model"] = rewritten_model
 
     return payload

@@ -1,7 +1,9 @@
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 
+import ezllm.providers.registry as provider_registry
 from ezllm.providers.registry import build_provider_registry
-from ezllm.proxy.request_normalizer import rewrite_request_model
+from ezllm.proxy.request_normalizer import rewrite_request_model, should_route_to_cloud
 
 
 class AttrDict(dict):
@@ -46,6 +48,28 @@ def test_registry_tracks_cloud_alias_family_and_active_provider_model():
 
     assert registry.cloud_family_for("or-sonnet") == "sonnet"
     assert registry.model_for_family("sonnet") == "anthropic/claude-sonnet-4.5"
+
+
+def test_cloud_routing_requires_active_provider_model_rewrite_target():
+    settings = SimpleNamespace(
+        proxy=SimpleNamespace(local_model_name="lm-local"),
+        llama=SimpleNamespace(model_path=r"C:\models\display-model.gguf"),
+        aliases=SimpleNamespace(local=[], cloud={"or-sonnet": "sonnet"}),
+        providers=AttrDict(
+            active="sub2",
+            sub2={
+                "base_url": "https://sub2.example.test",
+                "models": {"opus": "claude-opus-4.6"},
+            },
+        ),
+    )
+    registry = build_provider_registry(settings)
+    request_json = {"model": "or-sonnet", "messages": []}
+
+    rewritten = rewrite_request_model(request_json, registry=registry)
+
+    assert should_route_to_cloud(request_json, registry=registry) is False
+    assert rewritten["model"] == "or-sonnet"
 
 
 def test_registry_maps_legacy_native_model_ids_to_cloud_family():
@@ -158,3 +182,18 @@ def test_registry_falls_back_to_openrouter_for_missing_or_invalid_active_provide
         assert registry.active_provider is not None
         assert registry.active_provider.name in {"or", "openrouter"}
         assert registry.model_for_family("sonnet") == "anthropic/claude-sonnet-4.6"
+
+
+def test_registry_derives_local_aliases_from_windows_model_path_independent_of_host(monkeypatch):
+    monkeypatch.setattr(provider_registry, "Path", PurePosixPath)
+    settings = SimpleNamespace(
+        proxy=SimpleNamespace(local_model_name=""),
+        llama=SimpleNamespace(model_path=r"C:\models\display-model.gguf"),
+        aliases=SimpleNamespace(local=[], cloud={}),
+        providers=AttrDict(),
+    )
+
+    registry = build_provider_registry(settings)
+
+    assert registry.local_model_name == "display-model.gguf"
+    assert "display-model.gguf" in registry.local_aliases
