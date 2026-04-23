@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ezllm.compat.logs_page import render_logs_page
+from ezllm.config.models import LlamaConfig, RuntimeConfig, Settings
 from ezllm.proxy.app import build_app
 
 
@@ -13,7 +14,20 @@ LOGS_PAGE_ASSET = Path(__file__).resolve().parents[2] / "assets" / "logs_page" /
 
 
 def _build_client(tmp_path: Path) -> TestClient:
-    return TestClient(build_app(log_dir=tmp_path))
+    settings = Settings(
+        runtime=RuntimeConfig(
+            host="127.0.0.1",
+            proxy_port=8888,
+            llama_port=8889,
+            log_dir=str(tmp_path),
+            state_dir=str(tmp_path / "state"),
+        ),
+        llama=LlamaConfig(
+            server_bin="llama-server",
+            model_path=r"C:\models\logs-compat.gguf",
+        ),
+    )
+    return TestClient(build_app(log_dir=tmp_path, settings=settings))
 
 
 def _write_history(tmp_path: Path, entries: list[dict] | None = None, *, raw_text: str | None = None) -> None:
