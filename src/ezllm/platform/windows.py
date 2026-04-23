@@ -10,7 +10,31 @@ class WindowsPlatformAdapter:
         }
 
     def terminate_tree(self, pid: int, *, force: bool = False) -> None:
-        proc = psutil.Process(pid)
-        for child in proc.children(recursive=True):
-            child.kill() if force else child.terminate()
-        proc.kill() if force else proc.terminate()
+        try:
+            proc = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return
+
+        processes = [*proc.children(recursive=True), proc]
+        alive = []
+
+        for process in processes:
+            try:
+                process.kill() if force else process.terminate()
+                alive.append(process)
+            except psutil.NoSuchProcess:
+                continue
+
+        gone, alive = psutil.wait_procs(alive, timeout=3)
+        del gone
+
+        if force:
+            return
+
+        for process in alive:
+            try:
+                process.kill()
+            except psutil.NoSuchProcess:
+                continue
+
+        psutil.wait_procs(alive, timeout=3)

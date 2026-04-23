@@ -13,6 +13,11 @@ class RuntimeManager:
         state = load_runtime_state(self.state_dir)
         if state is None:
             return "EZLLM not running"
+        if state.status != "running":
+            return (
+                f"EZLLM {state.status} on proxy:{state.proxy_port} llama:{state.llama_port} "
+                f"(proxy pid={state.proxy_pid}, llama pid={state.llama_pid})"
+            )
         return (
             f"EZLLM running on proxy:{state.proxy_port} llama:{state.llama_port} "
             f"(proxy pid={state.proxy_pid}, llama pid={state.llama_pid})"
