@@ -116,14 +116,14 @@ def parse_user_content_html(content_str: str) -> str:
             return (
                 '<div style="margin-bottom: 8px;"><span style="background:#21262d; padding:2px 6px; '
                 'border-radius:4px; font-size:11px; color:#39c5cf; margin-right:8px; border: 1px solid '
-                f'#00aba9;">馃懁 {html.escape(username)}</span><span style="background:#21262d; padding:2px 6px; '
-                'border-radius:4px; font-size:11px; color:#8b949e; border: 1px solid #30363d;">馃晵 '
+                f'#00aba9;">👤 {html.escape(username)}</span><span style="background:#21262d; padding:2px 6px; '
+                'border-radius:4px; font-size:11px; color:#8b949e; border: 1px solid #30363d;">🕒 '
                 f'{html.escape(timestamp)}</span></div><div>{html.escape(actual_msg)}</div>'
             )
 
         return (
             '<div style="margin-bottom: 8px;"><span style="background:#21262d; padding:2px 6px; '
-            'border-radius:4px; font-size:11px; color:#39c5cf; border: 1px solid #00aba9;">馃懁 '
+            'border-radius:4px; font-size:11px; color:#39c5cf; border: 1px solid #00aba9;">👤 '
             f'{html.escape(username)}</span></div><div>{html.escape(clean_content)}</div>'
         )
 

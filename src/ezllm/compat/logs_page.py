@@ -1,6 +1,5 @@
-from pathlib import Path
+from importlib import resources
 
 
 def render_logs_page() -> str:
-    asset_path = Path(__file__).resolve().parents[3] / "assets" / "logs_page" / "index.html"
-    return asset_path.read_text(encoding="utf-8")
+    return resources.files("ezllm.compat").joinpath("logs_page.html").read_text(encoding="utf-8")

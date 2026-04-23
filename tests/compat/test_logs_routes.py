@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from ezllm.compat.logs_page import render_logs_page
 from ezllm.proxy.app import build_app
 
 
@@ -26,11 +27,13 @@ def _write_history(tmp_path: Path, entries: list[dict] | None = None, *, raw_tex
 
 def test_logs_page_serves_exact_frozen_markup(tmp_path):
     client = _build_client(tmp_path)
+    expected = LOGS_PAGE_ASSET.read_text(encoding="utf-8")
 
     response = client.get("/logs")
 
     assert response.status_code == 200
-    assert response.text == LOGS_PAGE_ASSET.read_text(encoding="utf-8")
+    assert render_logs_page() == expected
+    assert response.text == expected
 
 
 def test_api_logs_returns_legacy_projected_shape_in_reverse_order(tmp_path):
@@ -87,12 +90,13 @@ def test_api_logs_renders_metadata_tagged_user_content(tmp_path):
     client = _build_client(tmp_path)
 
     entry = client.get("/api/logs?page=1&size=10").json()["entries"][0]
-    body = entry["messages"][0]["body"]
-
-    assert "Alice" in body
-    assert "2026-04-24 09:30" in body
-    assert "hello" in body
-    assert "<div" in body
+    assert entry["messages"][0]["body"] == (
+        '<div style="margin-bottom: 8px;"><span style="background:#21262d; padding:2px 6px; '
+        'border-radius:4px; font-size:11px; color:#39c5cf; margin-right:8px; border: 1px solid '
+        '#00aba9;">👤 Alice</span><span style="background:#21262d; padding:2px 6px; '
+        'border-radius:4px; font-size:11px; color:#8b949e; border: 1px solid #30363d;">🕒 '
+        '2026-04-24 09:30</span></div><div>hello</div>'
+    )
 
 
 def test_api_logs_detects_count_tokens_request_kind(tmp_path):

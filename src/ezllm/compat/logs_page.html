@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LM Core Monitor</title>
+<style>
+:root{--preview-lines:3;--preview-h:calc(var(--preview-lines) * 1.6em)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.6}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0d1117}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#484f58}
+
+.shell{padding:24px 20px}
+
+/* header */
+.hdr{text-align:center;padding:32px 0 24px;border-bottom:1px solid #21262d;margin-bottom:24px}
+.hdr h1{font-size:22px;font-weight:600;color:#e6edf3;letter-spacing:.3px}
+.hdr p{font-size:13px;color:#8b949e;margin-top:4px}
+
+/* toolbar */
+.toolbar{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center}
+.toolbar input[type=text]{flex:1;min-width:200px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;outline:none;transition:border-color .2s}
+.toolbar input[type=text]:focus{border-color:#388bfd}
+.toolbar select{padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;outline:none;cursor:pointer}
+.toolbar .stats{font-size:12px;color:#8b949e;margin-left:auto;white-space:nowrap}
+
+/* pagination */
+.pager{display:flex;justify-content:center;align-items:center;gap:6px;padding:20px 0}
+.pager button{padding:6px 14px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;cursor:pointer;transition:all .15s}
+.pager button:hover:not(:disabled){background:#30363d;border-color:#484f58}
+.pager button:disabled{opacity:.4;cursor:default}
+.pager button.cur{background:#388bfd;border-color:#388bfd;color:#fff;font-weight:600}
+.pager .info{font-size:12px;color:#8b949e;margin:0 8px}
+
+/* log card */
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:#484f58}
+.card-meta{display:flex;gap:16px;padding:14px 16px;font-size:12px;color:#8b949e;border-bottom:1px solid #21262d;flex-wrap:wrap;align-items:center}
+.card-meta .tag{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.tag-local{background:rgba(56,139,253,.15);color:#58a6ff}
+.tag-cloud{background:rgba(163,113,247,.15);color:#d2a8ff}
+.tag-model{background:rgba(63,185,80,.12);color:#7ee787}
+.tag-kind{background:rgba(210,168,255,.12);color:#d2a8ff}
+
+/* blocks */
+.blk{margin:8px;border-radius:6px;border:1px solid #30363d;background:#0d1117;overflow:hidden;position:relative}
+.blk:last-child{margin-bottom:12px}
+.blk-h{padding:8px 12px;font-size:11px;font-weight:600;letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;transition:background .15s}
+.blk-h:hover{background:#161b22}
+.blk-b{padding:12px;font-size:13px;white-space:pre-wrap;word-wrap:break-word;overflow:hidden;max-height:var(--preview-h);position:relative;transition:max-height .3s ease}
+.blk:not(.open)>.blk-b::after{content:"";position:absolute;bottom:0;left:0;width:100%;height:2em;background:linear-gradient(transparent,#0d1117);pointer-events:none}
+.blk.open>.blk-b{max-height:40000px;padding-bottom:24px}
+.blk-h::after{content:"\\5C55\\5F00 \\25BC";font-size:10px;opacity:.5}
+.blk.open>.blk-h::after{content:"\\6536\\8D77 \\25B2"}
+
+/* block colors */
+.b-inputs .blk-h{color:#58a6ff} .b-inputs{border-left:3px solid #388bfd}
+.b-system .blk-h{color:#f0883e} .b-system{border-left:3px solid #cb4b16}
+.b-user .blk-h{color:#39c5cf} .b-user{border-left:3px solid #00aba9}
+.b-assistant .blk-h{color:#d2a8ff} .b-assistant{border-left:3px solid #8957e5}
+.b-think .blk-h{color:#ff7b72;font-style:italic} .b-think{border-left:3px solid #db61a2}
+.b-resp .blk-h{color:#7ee787} .b-resp{border-left:3px solid #3fb950}
+.b-raw .blk-h{color:#e3b341} .b-raw{border-left:3px solid #d29922}
+.b-raw-req .blk-h{color:#d2a8ff} .b-raw-req{border-left:3px solid #a371f7}
+.b-raw-resp .blk-h{color:#7ee787} .b-raw-resp{border-left:3px solid #3fb950}
+
+.raw-pre{background:transparent;border:none;padding:0;margin:0;font-family:'Consolas','Monaco',monospace;font-size:12px;overflow:auto;white-space:pre;max-height:60vh}
+.json-key{color:#79c0ff}.json-string{color:#a5d6ff}.json-number{color:#d2a8ff}.json-boolean{color:#ff7b72}.json-null{color:#8b949e;font-style:italic}
+
+/* inner msg blocks in INPUTS */
+.blk-b .blk{margin:4px 0}
+.b-inputs>.blk-b,.b-raw>.blk-b{white-space:normal;max-height:none}
+.b-inputs:not(.open)>.blk-b,.b-raw:not(.open)>.blk-b{max-height:var(--preview-h)}
+.b-inputs.open>.blk-b,.b-raw.open>.blk-b{max-height:none}
+
+/* loading & empty */
+.loading{text-align:center;padding:60px 0;color:#8b949e;font-size:14px}
+.empty{text-align:center;padding:60px 0;color:#484f58;font-size:14px}
+
+@media(max-width:640px){
+  .shell{padding:12px 8px}
+  .card-meta{gap:8px;padding:10px 12px}
+  .toolbar{flex-direction:column}
+  .toolbar .stats{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hdr">
+    <h1>LM Core Monitor</h1>
+    <p id="subtitle"></p>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Search logs..." oninput="onSearch()">
+    <select id="previewLines" onchange="onPreviewChange()">
+      <option value="2">2 lines</option>
+      <option value="3" selected>3 lines</option>
+      <option value="5">5 lines</option>
+      <option value="8">8 lines</option>
+      <option value="15">15 lines</option>
+    </select>
+    <select id="pageSize" onchange="onPageSizeChange()">
+      <option value="5">5 / page</option>
+      <option value="10" selected>10 / page</option>
+      <option value="20">20 / page</option>
+      <option value="50">50 / page</option>
+    </select>
+    <span class="stats" id="stats"></span>
+  </div>
+  <div id="logs"></div>
+  <div class="pager" id="pager"></div>
+</div>
+
+<script>
+let state={page:1,size:10,pages:0,total:0,entries:[],q:""};
+const $=id=>document.getElementById(id);
+
+async function load(){
+  $("logs").innerHTML='<div class="loading">Loading...</div>';
+  try{
+    const r=await fetch(`/api/logs?page=${state.page}&size=${state.size}`);
+    const d=await r.json();
+    state.entries=d.entries;state.total=d.total;state.pages=d.pages;
+    render();
+  }catch(e){
+    $("logs").innerHTML='<div class="empty">Failed to load logs</div>';
+  }
+}
+
+function esc(s){
+  if(!s)return"";
+  const d=document.createElement("div");d.textContent=s;return d.innerHTML;
+}
+
+function highlightJson(text){
+  return text.replace(/("(\\\\u[a-zA-Z0-9]{4}|\\\\[^u]|[^\\\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,function(m){
+    let c="json-number";
+    if(/^"/.test(m)){c=/:$/.test(m)?"json-key":"json-string"}
+    else if(/true|false/.test(m))c="json-boolean";
+    else if(/null/.test(m))c="json-null";
+    return'<span class="'+c+'">'+m+"</span>";
+  });
+}
+
+function mkBlk(cls,title,body,startOpen){
+  return`<div class="blk b-${cls}${startOpen?" open":""}"><div class="blk-h" onclick="this.parentElement.classList.toggle('open')">${title}</div><div class="blk-b">${body}</div></div>`;
+}
+
+function renderEntry(e){
+  const upstream=e.upstream||"-";
+  const tagCls=upstream.startsWith("local")?"tag-local":"tag-cloud";
+  const requestModel=e.request_model||"-";
+  const requestKind=e.request_kind||"request";
+  let h=`<div class="card"><div class="card-meta">`;
+  h+=`<span>${esc(e.timestamp)}</span>`;
+  h+=`<span>${e.duration_sec}s</span>`;
+  h+=`<span>${esc(e.path)}</span>`;
+  h+=`<span class="tag tag-model">model=${esc(requestModel)}</span>`;
+  h+=`<span class="tag tag-kind">${esc(requestKind)}</span>`;
+  h+=`<span class="tag ${tagCls}">${esc(upstream)}</span>`;
+  h+=`</div>`;
+
+  // INPUTS
+  let inputsBody="";
+  (e.messages||[]).forEach(m=>{
+    inputsBody+=mkBlk(m.role,m.role.toUpperCase(),`<div>${m.body}</div>`,false);
+  });
+  h+=mkBlk("inputs","INPUTS",inputsBody,false);
+
+  // REASONING
+  if(e.reasoning){
+    h+=mkBlk("think","REASONING",`<div>${esc(e.reasoning)}</div>`,false);
+  }
+
+  // FINAL OUTPUT
+  h+=mkBlk("resp","OUTPUT",`<div>${esc(e.content)}</div>`,true);
+
+  // RAW DATA
+  const reqJson=highlightJson(esc(JSON.stringify(e.request_raw,null,2)));
+  const respJson=highlightJson(esc(JSON.stringify(e.response_raw,null,2)));
+  const rawBody=mkBlk("raw-req","RAW REQUEST",`<pre class="raw-pre"><code>${reqJson}</code></pre>`,false)
+               +mkBlk("raw-resp","RAW RESPONSE",`<pre class="raw-pre"><code>${respJson}</code></pre>`,false);
+  h+=mkBlk("raw","RAW DATA",rawBody,false);
+
+  h+=`</div>`;
+  return h;
+}
+
+function render(){
+  $("subtitle").textContent=`${state.total} entries`;
+  $("stats").textContent=`Page ${state.page} of ${state.pages}`;
+
+  let entries=state.entries;
+  if(state.q){
+    const q=state.q.toLowerCase();
+    entries=entries.filter(e=>{
+      const txt=JSON.stringify(e).toLowerCase();
+      return txt.includes(q);
+    });
+  }
+
+  if(!entries.length){
+    $("logs").innerHTML='<div class="empty">No matching logs</div>';
+  }else{
+    $("logs").innerHTML=entries.map(renderEntry).join("");
+  }
+
+  // pager
+  let pg="";
+  pg+=`<button onclick="go(1)" ${state.page<=1?"disabled":""}>&#171;</button>`;
+  pg+=`<button onclick="go(${state.page-1})" ${state.page<=1?"disabled":""}>&#8249;</button>`;
+
+  const maxBtns=5;
+  let start=Math.max(1,state.page-Math.floor(maxBtns/2));
+  let end=Math.min(state.pages,start+maxBtns-1);
+  start=Math.max(1,end-maxBtns+1);
+  for(let i=start;i<=end;i++){
+    pg+=`<button onclick="go(${i})" class="${i===state.page?"cur":""}">${i}</button>`;
+  }
+
+  pg+=`<button onclick="go(${state.page+1})" ${state.page>=state.pages?"disabled":""}>&#8250;</button>`;
+  pg+=`<button onclick="go(${state.pages})" ${state.page>=state.pages?"disabled":""}>&#187;</button>`;
+  $("pager").innerHTML=pg;
+}
+
+function go(p){
+  if(p<1||p>state.pages||p===state.page)return;
+  state.page=p;load();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function onSearch(){state.q=$("search").value;render();}
+function onPageSizeChange(){state.size=parseInt($("pageSize").value);state.page=1;load();}
+function onPreviewChange(){document.documentElement.style.setProperty("--preview-lines",$("previewLines").value);}
+
+load();
+</script>
+</body></html>
