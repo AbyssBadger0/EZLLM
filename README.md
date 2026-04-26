@@ -8,12 +8,9 @@ known gaps, and next milestone plan, see [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.
 ## Current Status
 
 EZLLM currently provides a CLI-managed local runtime that launches both the
-FastAPI control proxy and a configured `llama-server` process. It also exposes
-logs, health, runtime metadata, and a browser control page.
-
-The remaining local inference gap is proxy forwarding: `/v1/chat/completions`
-is not wired through EZLLM yet, so chat smoke tests should still be sent
-directly to the managed llama.cpp server port.
+FastAPI workbench proxy and a configured `llama-server` process. It exposes a
+browser workbench, the llama.cpp Web UI, logs, health, runtime metadata, and
+OpenAI-compatible llama.cpp API proxying.
 
 ## Install EZLLM
 
@@ -184,11 +181,22 @@ Start it in the background and open the browser control page:
 .\.venv\Scripts\python.exe -m ezllm.cli start --open
 ```
 
-The control page is available at:
+The workbench is available at:
 
 ```text
-http://127.0.0.1:8888/control
+http://127.0.0.1:8888/
 ```
+
+From the workbench, open:
+
+```text
+http://127.0.0.1:8888/llama/
+http://127.0.0.1:8888/control
+http://127.0.0.1:8888/logs
+```
+
+EZLLM keeps `8889` as the internal llama.cpp server port, while browser and API
+entrypoints can stay on `8888`.
 
 Useful CLI commands:
 
@@ -208,13 +216,13 @@ Invoke-RestMethod http://127.0.0.1:8888/healthz
 Invoke-RestMethod http://127.0.0.1:8888/runtime-config
 ```
 
-EZLLM manages `llama-server` internally after `run` or `start`, so send local
-chat smoke tests to the llama.cpp port:
+EZLLM manages `llama-server` internally after `run` or `start`. You can send
+local chat smoke tests through EZLLM on port `8888`:
 
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri http://127.0.0.1:8889/v1/chat/completions `
+  -Uri http://127.0.0.1:8888/v1/chat/completions `
   -ContentType "application/json" `
   -Body '{"model":"local","messages":[{"role":"user","content":"Say hello in one short sentence."}],"stream":false}'
 ```

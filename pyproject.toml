@@ -32,4 +32,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ezllm.compat" = ["logs_page.html", "control_page.html"]
+"ezllm.compat" = ["logs_page.html", "control_page.html", "workbench_page.html"]

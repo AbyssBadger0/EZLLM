@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EZLLM Workbench</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --text: #18212f;
+      --muted: #5d6878;
+      --line: #d9e0ea;
+      --accent: #0f62fe;
+      --accent-ink: #ffffff;
+      --ok: #0a7a45;
+      --warn: #9a5b00;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101418;
+        --panel: #171c22;
+        --text: #e8edf3;
+        --muted: #a7b1bf;
+        --line: #2b333e;
+        --accent: #75a7ff;
+        --accent-ink: #061122;
+        --ok: #65d7a0;
+        --warn: #f0bd5a;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 18px 24px;
+    }
+    .topbar, main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .status-pill {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+      display: inline-block;
+    }
+    .dot.ok { background: var(--ok); }
+    main {
+      padding: 22px 0 32px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .metric, .entry {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .metric {
+      min-width: 0;
+      padding: 13px 14px;
+    }
+    .metric b {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .metric span {
+      display: block;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+    }
+    .entry {
+      min-height: 132px;
+      padding: 16px;
+      text-decoration: none;
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+    .entry:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .entry:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .entry strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+    .entry span {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .open {
+      color: var(--accent);
+      font-weight: 700;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <h1>EZLLM Workbench</h1>
+      <div class="status-pill"><span id="dot" class="dot"></span><span id="status">Loading</span></div>
+    </div>
+  </header>
+  <main>
+    <section class="summary" aria-label="runtime summary">
+      <div class="metric"><b>Model</b><span id="model">-</span></div>
+      <div class="metric"><b>Proxy</b><span id="proxy">-</span></div>
+      <div class="metric"><b>Llama</b><span id="llama">-</span></div>
+      <div class="metric"><b>Started</b><span id="started">-</span></div>
+    </section>
+    <nav aria-label="workbench pages">
+      <a class="entry" href="/llama/">
+        <span><strong>Llama Chat</strong><span>llama.cpp</span></span>
+        <span class="open">Open</span>
+      </a>
+      <a class="entry" href="/control">
+        <span><strong>Control</strong><span>Runtime settings</span></span>
+        <span class="open">Open</span>
+      </a>
+      <a class="entry" href="/logs">
+        <span><strong>Logs</strong><span>Chat history</span></span>
+        <span class="open">Open</span>
+      </a>
+    </nav>
+  </main>
+  <script>
+    const text = (id, value) => { document.getElementById(id).textContent = value || "-"; };
+    fetch("/healthz")
+      .then((response) => response.json())
+      .then((payload) => {
+        const running = payload.llama_status === "running";
+        document.getElementById("dot").classList.toggle("ok", running);
+        text("status", running ? "Running" : payload.llama_status);
+        text("model", payload.display_model_name);
+        text("proxy", `:${payload.proxy_port}`);
+        text("llama", `:${payload.llama_port}`);
+        text("started", payload.started_at || "-");
+      })
+      .catch(() => {
+        text("status", "Unavailable");
+      });
+  </script>
+</body>
+</html>
