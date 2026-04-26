@@ -120,7 +120,7 @@
       font-size: 12px;
       font-weight: 600;
     }
-    input, select {
+    input, select, textarea {
       width: 100%;
       min-height: 40px;
       border: 1px solid var(--line);
@@ -130,7 +130,11 @@
       padding: 8px 10px;
       font: inherit;
     }
-    input:focus, select:focus, button:focus {
+    textarea {
+      min-height: 84px;
+      resize: vertical;
+    }
+    input:focus, select:focus, textarea:focus, button:focus {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
@@ -158,6 +162,65 @@
     button.danger {
       border-color: var(--danger);
       color: var(--danger);
+    }
+    .compact {
+      margin: 12px 0;
+      box-shadow: none;
+    }
+    .path-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    .full {
+      grid-column: 1 / -1;
+    }
+    .browser {
+      margin-top: 16px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .browser[hidden] {
+      display: none;
+    }
+    .browser-head, .browser-actions, .browser-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .browser-head {
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .browser-title {
+      font-weight: 650;
+    }
+    .browser-path {
+      margin: 8px 0;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .browser-list {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .browser-entry {
+      justify-content: space-between;
+      min-height: 40px;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .browser-entry span {
+      overflow-wrap: anywhere;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 10px 0;
     }
     .message {
       min-height: 22px;
@@ -193,9 +256,26 @@
       <fieldset>
         <legend>Paths</legend>
         <div class="grid">
-          <label>Server Bin <input name="llama.server_bin" autocomplete="off"></label>
-          <label>Model Path <input name="llama.model_path" autocomplete="off"></label>
-          <label>MMProj Path <input name="llama.mmproj_path" autocomplete="off"></label>
+          <label>Server Bin <span class="path-control"><input name="llama.server_bin" autocomplete="off"><button type="button" onclick="openPathBrowser('llama.server_bin', 'llama')">Browse</button></span></label>
+          <label>Model Path <span class="path-control"><input name="llama.model_path" autocomplete="off"><button type="button" onclick="openPathBrowser('llama.model_path', 'models')">Browse</button></span></label>
+          <label>MMProj Path <span class="path-control"><input name="llama.mmproj_path" autocomplete="off"><button type="button" onclick="openPathBrowser('llama.mmproj_path', 'models')">Browse</button></span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Discovery</legend>
+        <div class="grid">
+          <label class="full">Model Scan Directories <textarea name="llama.model_scan_dirs" rows="3" spellcheck="false"></textarea></label>
+          <label class="full">llama.cpp Directories <textarea name="llama.llama_cpp_dirs" rows="3" spellcheck="false"></textarea></label>
+        </div>
+        <div class="toolbar compact" aria-label="discovery actions">
+          <button type="button" onclick="openPathBrowser('llama.model_scan_dirs', 'directories')">Add Model Folder</button>
+          <button type="button" onclick="scanModels()">Scan Models</button>
+          <button type="button" onclick="openPathBrowser('llama.llama_cpp_dirs', 'directories')">Add llama.cpp Folder</button>
+          <button type="button" onclick="scanLlamaBinaries()">Scan llama.cpp</button>
+        </div>
+        <div class="grid">
+          <label>Detected Models <select id="model-select" onchange="applyModelSelection()"><option value="">Scan to load models</option></select></label>
+          <label>Detected llama-server <select id="server-select" onchange="applyServerSelection()"><option value="">Scan to load binaries</option></select></label>
         </div>
       </fieldset>
       <fieldset>
@@ -219,13 +299,30 @@
       </fieldset>
       <div class="message" id="message" role="status"></div>
     </form>
+    <section class="browser" id="path-browser" hidden>
+      <div class="browser-head">
+        <div>
+          <div class="browser-title">Local Path Browser</div>
+          <div class="browser-path" id="browser-target"></div>
+        </div>
+        <button type="button" onclick="closePathBrowser()">Close</button>
+      </div>
+      <div class="browser-actions">
+        <button type="button" id="browser-parent">Up</button>
+        <button type="button" id="browser-use-current">Use Current Folder</button>
+      </div>
+      <div class="browser-path" id="browser-path"></div>
+      <div class="browser-list" id="browser-entries"></div>
+    </section>
   </main>
   <script>
     const numericFields = new Set([
       "runtime.proxy_port", "runtime.llama_port", "llama.gpu_layers",
       "llama.ctx_size", "llama.n_predict", "llama.batch_size", "llama.parallel"
     ]);
+    const arrayFields = new Set(["llama.model_scan_dirs", "llama.llama_cpp_dirs"]);
     const $ = (selector) => document.querySelector(selector);
+    let browserTarget = null;
     const setMessage = (text, cls = "") => {
       const el = $("#message");
       el.className = `message ${cls}`;
@@ -237,6 +334,13 @@
       let cur = obj;
       for (const part of parts.slice(0, -1)) cur = cur[part] ||= {};
       cur[parts.at(-1)] = value;
+    };
+    const parseList = (value) => value.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+    const fieldFor = (name) => document.querySelector(`[name="${name}"]`);
+    const formatBytes = (bytes) => {
+      if (!Number.isFinite(bytes)) return "";
+      if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+      return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
     };
     async function refreshAll() {
       const [health, config] = await Promise.all([
@@ -253,15 +357,16 @@
       ].map(([k, v]) => `<div class="metric"><b>${k}</b><span>${String(v)}</span></div>`).join("");
       for (const input of document.querySelectorAll("[name]")) {
         const value = getPath(config, input.name);
-        input.value = value ?? "";
+        input.value = arrayFields.has(input.name) && Array.isArray(value) ? value.join("\n") : value ?? "";
       }
       setMessage("Loaded", "ok");
     }
-    async function saveConfig() {
+    async function saveConfig(options = {}) {
       const payload = {};
       for (const input of document.querySelectorAll("[name]")) {
         let value = input.value;
-        if (numericFields.has(input.name)) value = Number(value);
+        if (arrayFields.has(input.name)) value = parseList(value);
+        else if (numericFields.has(input.name)) value = Number(value);
         setPath(payload, input.name, value);
       }
       const response = await fetch("/api/control/config", {
@@ -271,9 +376,121 @@
       });
       if (!response.ok) {
         setMessage(await response.text(), "err");
+        throw new Error("Save failed");
+      }
+      const data = await response.json();
+      if (!options.silent) setMessage("Saved", "ok");
+      return data;
+    }
+    async function scanModels() {
+      await saveConfig({silent: true});
+      const payload = await fetch("/api/control/models").then(r => r.json());
+      const select = $("#model-select");
+      select.innerHTML = "";
+      if (!payload.models?.length) {
+        select.append(new Option("No models found", ""));
+        setMessage("No .gguf models found in configured directories", "err");
         return;
       }
-      setMessage("Saved", "ok");
+      for (const model of payload.models) {
+        const option = new Option(`${model.name} (${formatBytes(model.size_bytes)})`, model.path);
+        option.dataset.mmprojPath = model.mmproj_path || "";
+        select.append(option);
+      }
+      setMessage(`Found ${payload.models.length} model(s)`, "ok");
+    }
+    function applyModelSelection() {
+      const option = $("#model-select").selectedOptions[0];
+      if (!option?.value) return;
+      fieldFor("llama.model_path").value = option.value;
+      if (option.dataset.mmprojPath) fieldFor("llama.mmproj_path").value = option.dataset.mmprojPath;
+      setMessage("Model selected", "ok");
+    }
+    async function scanLlamaBinaries() {
+      await saveConfig({silent: true});
+      const payload = await fetch("/api/control/llama-binaries").then(r => r.json());
+      const select = $("#server-select");
+      select.innerHTML = "";
+      if (!payload.binaries?.length) {
+        select.append(new Option("No llama-server binaries found", ""));
+        setMessage("No llama-server binary found in configured directories", "err");
+        return;
+      }
+      for (const binary of payload.binaries) {
+        select.append(new Option(`${binary.name} (${binary.directory})`, binary.path));
+      }
+      setMessage(`Found ${payload.binaries.length} llama-server result(s)`, "ok");
+    }
+    function applyServerSelection() {
+      const value = $("#server-select").value;
+      if (!value) return;
+      fieldFor("llama.server_bin").value = value;
+      setMessage("Server binary selected", "ok");
+    }
+    async function openPathBrowser(fieldName, filter) {
+      browserTarget = {fieldName, filter};
+      $("#path-browser").hidden = false;
+      $("#browser-target").textContent = fieldName;
+      $("#browser-use-current").hidden = !arrayFields.has(fieldName);
+      const field = fieldFor(fieldName);
+      const current = arrayFields.has(fieldName) ? parseList(field.value)[0] : field.value;
+      await loadBrowserPath(current || "", filter);
+    }
+    function closePathBrowser() {
+      $("#path-browser").hidden = true;
+      browserTarget = null;
+    }
+    async function loadBrowserPath(path, filter = browserTarget?.filter || "all") {
+      const params = new URLSearchParams({filter});
+      if (path) params.set("path", path);
+      const response = await fetch(`/api/control/browse?${params.toString()}`);
+      if (!response.ok) {
+        setMessage(await response.text(), "err");
+        return;
+      }
+      const payload = await response.json();
+      $("#browser-path").textContent = payload.path;
+      const parentButton = $("#browser-parent");
+      parentButton.disabled = !payload.parent;
+      parentButton.onclick = () => payload.parent && loadBrowserPath(payload.parent, filter);
+      $("#browser-use-current").onclick = () => selectBrowserPath(payload.path);
+      renderBrowserEntries(payload.entries || [], filter);
+    }
+    function renderBrowserEntries(entries, filter) {
+      const list = $("#browser-entries");
+      list.innerHTML = "";
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No matching entries";
+        list.append(empty);
+        return;
+      }
+      for (const entry of entries) {
+        const row = document.createElement("div");
+        row.className = "browser-entry";
+        const label = document.createElement("span");
+        label.textContent = `${entry.type === "directory" ? "[dir]" : "[file]"} ${entry.name}`;
+        const action = document.createElement("button");
+        action.type = "button";
+        action.textContent = entry.type === "directory" ? "Open" : "Select";
+        action.onclick = () => entry.type === "directory"
+          ? loadBrowserPath(entry.path, filter)
+          : selectBrowserPath(entry.path);
+        row.append(label, action);
+        list.append(row);
+      }
+    }
+    function selectBrowserPath(path) {
+      const field = fieldFor(browserTarget.fieldName);
+      if (arrayFields.has(browserTarget.fieldName)) {
+        const values = parseList(field.value);
+        if (!values.includes(path)) values.push(path);
+        field.value = values.join("\n");
+      } else {
+        field.value = path;
+      }
+      setMessage("Path selected", "ok");
     }
     async function restartRuntime() {
       await fetch("/api/control/restart", {method: "POST"});

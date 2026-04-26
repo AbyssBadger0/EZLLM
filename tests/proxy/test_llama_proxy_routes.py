@@ -142,6 +142,60 @@ def test_openai_api_request_can_proxy_to_llama_server(tmp_path, monkeypatch):
     assert FakeAsyncClient.requests[0]["content"] == b'{"model":"local"}'
 
 
+def test_openai_reasoning_effort_off_maps_to_llama_thinking_disabled(tmp_path, monkeypatch):
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "messages": [{"role": "user", "content": "ping"}],
+            "reasoning": {"effort": "off"},
+            "reasoning_format": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    forwarded = json.loads(FakeAsyncClient.requests[0]["content"].decode("utf-8"))
+    assert "reasoning" not in forwarded
+    assert forwarded["chat_template_kwargs"]["enable_thinking"] is False
+    assert forwarded["thinking_budget_tokens"] == 0
+    assert forwarded["reasoning_format"] == "auto"
+    forwarded_headers = {key.lower(): value for key, value in FakeAsyncClient.requests[0]["headers"].items()}
+    assert "content-length" not in forwarded_headers
+
+    raw_entry = json.loads(history_file_for(tmp_path).read_text(encoding="utf-8").strip())
+    assert raw_entry["request_raw"]["reasoning"] == {"effort": "off"}
+
+
+def test_openai_reasoning_effort_high_maps_to_llama_budget_and_preserves_template_kwargs(tmp_path, monkeypatch):
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "messages": [{"role": "user", "content": "ping"}],
+            "reasoning_effort": "high",
+            "chat_template_kwargs": {"custom": "value"},
+        },
+    )
+
+    assert response.status_code == 200
+    forwarded = json.loads(FakeAsyncClient.requests[0]["content"].decode("utf-8"))
+    assert "reasoning_effort" not in forwarded
+    assert forwarded["chat_template_kwargs"] == {
+        "custom": "value",
+        "enable_thinking": True,
+        "reasoning_effort": "high",
+    }
+    assert forwarded["thinking_budget_tokens"] == 32768
+
+
 def test_openai_chat_proxy_persists_logs_for_logs_page(tmp_path, monkeypatch):
     FakeAsyncClient.requests = []
     monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)

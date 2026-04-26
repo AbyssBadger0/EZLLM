@@ -9,10 +9,12 @@ import httpx
 
 from ezllm.logs.store import save_raw_log
 from ezllm.proxy.response_normalizer import parse_openai_payload_for_log
+from ezllm.proxy.reasoning_mapper import map_unified_reasoning_for_llama
 
 
 HOP_BY_HOP_HEADERS = {
     "connection",
+    "content-length",
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
@@ -119,13 +121,14 @@ def build_llama_proxy_router(settings) -> APIRouter:
     async def proxy_to_llama(request: Request, path: str = "") -> Response:
         url = _upstream_url(settings, path, request.scope.get("query_string", b""))
         body = await request.body()
+        upstream_body = map_unified_reasoning_for_llama(body) if _is_chat_completion(path) else body
         started = time.perf_counter()
         async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
             upstream = await client.request(
                 request.method,
                 url,
                 headers=_filtered_headers(request.headers),
-                content=body,
+                content=upstream_body,
             )
         duration = time.perf_counter() - started
         if request.method == "POST" and _is_chat_completion(path):

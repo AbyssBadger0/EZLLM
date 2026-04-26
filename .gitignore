@@ -21,9 +21,36 @@ dist/
 .coverage
 htmlcov/
 
+# Local environment and runtime state
+.env
+.env.*
+!.env.example
+.local/
+logs/
+*.log
+config.toml
+
 # Local review/test scratch directories
 tmp_review*/
+findings.md
+progress.md
+task_plan.md
+ref/
 
 # Downloaded llama.cpp runtime bundles
 vendor/llama/*
 !vendor/llama/README.md
+
+# Large model and runtime artifacts
+models/
+*.gguf
+*.safetensors
+*.bin
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.dll
+*.so
+*.dylib
+*.exe

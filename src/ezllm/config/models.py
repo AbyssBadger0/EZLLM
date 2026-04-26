@@ -13,6 +13,8 @@ class LlamaConfig(BaseModel):
     server_bin: str = Field(min_length=1)
     model_path: str = Field(min_length=1)
     mmproj_path: str | None = None
+    model_scan_dirs: list[str] = Field(default_factory=list)
+    llama_cpp_dirs: list[str] = Field(default_factory=list)
     ctx_size: int = 200000
     n_predict: int = 81920
     parallel: int = 1
