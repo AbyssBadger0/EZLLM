@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from ezllm.config import defaults
 from ezllm.config.loader import _config_path, load_settings
@@ -134,9 +134,15 @@ def test_config_defaults_use_windows_appdata(monkeypatch):
     monkeypatch.setenv("APPDATA", r"C:\Users\tester\AppData\Roaming")
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\tester\AppData\Local")
 
-    assert _config_path() == Path(r"C:\Users\tester\AppData\Roaming\EZLLM\config.toml")
-    assert Path(defaults.default_log_dir()) == Path(r"C:\Users\tester\AppData\Local\EZLLM\logs")
-    assert Path(defaults.default_state_dir()) == Path(r"C:\Users\tester\AppData\Local\EZLLM\state")
+    assert PureWindowsPath(_config_path()) == PureWindowsPath(
+        r"C:\Users\tester\AppData\Roaming\EZLLM\config.toml"
+    )
+    assert PureWindowsPath(defaults.default_log_dir()) == PureWindowsPath(
+        r"C:\Users\tester\AppData\Local\EZLLM\logs"
+    )
+    assert PureWindowsPath(defaults.default_state_dir()) == PureWindowsPath(
+        r"C:\Users\tester\AppData\Local\EZLLM\state"
+    )
 
 
 def test_config_defaults_use_macos_application_support(monkeypatch):
