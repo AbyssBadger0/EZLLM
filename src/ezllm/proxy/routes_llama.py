@@ -1,8 +1,14 @@
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 import httpx
+
+from ezllm.logs.store import save_raw_log
+from ezllm.proxy.response_normalizer import parse_openai_payload_for_log
 
 
 HOP_BY_HOP_HEADERS = {
@@ -33,17 +39,102 @@ def _upstream_url(settings: Any, path: str, query_string: bytes) -> str:
     return url
 
 
+def _request_json(body: bytes):
+    if not body:
+        return {}
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _is_chat_completion(path: str) -> bool:
+    return path.strip("/").lower().endswith("chat/completions")
+
+
+def _append_sse_payloads(content: bytes, reasoning_parts: list[str], content_parts: list[str]) -> None:
+    text = content.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+
+        data = line.removeprefix("data:").strip()
+        if not data or data == "[DONE]":
+            continue
+
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            parse_openai_payload_for_log(payload, reasoning_parts, content_parts)
+
+
+def _extract_response_text(upstream: httpx.Response) -> tuple[str, str]:
+    reasoning_parts: list[str] = []
+    content_parts: list[str] = []
+    content_type = upstream.headers.get("content-type", "").lower()
+
+    if "text/event-stream" in content_type:
+        _append_sse_payloads(upstream.content, reasoning_parts, content_parts)
+        return "".join(reasoning_parts), "".join(content_parts)
+
+    try:
+        payload = upstream.json()
+    except Exception:
+        return "", ""
+    if isinstance(payload, dict):
+        parse_openai_payload_for_log(payload, reasoning_parts, content_parts)
+    return "".join(reasoning_parts), "".join(content_parts)
+
+
+def _record_chat_log(
+    *,
+    settings: Any,
+    request_json,
+    path: str,
+    upstream: httpx.Response,
+    duration: float,
+) -> None:
+    reasoning, content = _extract_response_text(upstream)
+    try:
+        save_raw_log(
+            log_dir=Path(settings.runtime.log_dir),
+            req_j=request_json,
+            reasoning=reasoning,
+            content=content,
+            duration=duration,
+            path=f"/{path.strip('/')}",
+            upstream="local:llama.cpp",
+        )
+    except Exception:
+        return
+
+
 def build_llama_proxy_router(settings) -> APIRouter:
     router = APIRouter()
 
     async def proxy_to_llama(request: Request, path: str = "") -> Response:
         url = _upstream_url(settings, path, request.scope.get("query_string", b""))
+        body = await request.body()
+        started = time.perf_counter()
         async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
             upstream = await client.request(
                 request.method,
                 url,
                 headers=_filtered_headers(request.headers),
-                content=await request.body(),
+                content=body,
+            )
+        duration = time.perf_counter() - started
+        if request.method == "POST" and _is_chat_completion(path):
+            _record_chat_log(
+                settings=settings,
+                request_json=_request_json(body),
+                path=path,
+                upstream=upstream,
+                duration=duration,
             )
         return Response(
             content=upstream.content,

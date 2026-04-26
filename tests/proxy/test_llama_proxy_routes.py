@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
 
 from ezllm.config.models import LlamaConfig, RuntimeConfig, Settings
+from ezllm.logs.store import history_file_for
 from ezllm.proxy.app import build_app
 
 
@@ -44,6 +46,32 @@ class FakeAsyncClient:
                 "content": content,
             }
         )
+        if str(url).endswith("/v1/chat/completions") and content and b'"stream":true' in content:
+            return httpx.Response(
+                200,
+                content=(
+                    b'data: {"choices":[{"delta":{"reasoning_content":"thinking "}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":" from stream"}}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
+                headers={"content-type": "text/event-stream"},
+            )
+        if str(url).endswith("/v1/chat/completions"):
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "reasoning_content": "thinking",
+                                "content": "hello from llama",
+                            }
+                        }
+                    ]
+                },
+                headers={"content-type": "application/json"},
+            )
         if str(url).endswith("/bundle.js?cache=1"):
             return httpx.Response(200, content=b"console.log('llama')", headers={"content-type": "text/javascript"})
         return httpx.Response(200, content=b"<html>llama.cpp</html>", headers={"content-type": "text/html"})
@@ -112,3 +140,57 @@ def test_openai_api_request_can_proxy_to_llama_server(tmp_path, monkeypatch):
     assert FakeAsyncClient.requests[0]["method"] == "POST"
     assert FakeAsyncClient.requests[0]["url"] == "http://127.0.0.1:8891/v1/chat/completions"
     assert FakeAsyncClient.requests[0]["content"] == b'{"model":"local"}'
+
+
+def test_openai_chat_proxy_persists_logs_for_logs_page(tmp_path, monkeypatch):
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+
+    assert response.status_code == 200
+    history_file = history_file_for(tmp_path)
+    assert history_file.exists()
+    raw_entry = json.loads(history_file.read_text(encoding="utf-8").strip())
+    assert raw_entry["path"] == "/v1/chat/completions"
+    assert raw_entry["upstream"] == "local:llama.cpp"
+    assert raw_entry["request_raw"]["messages"][0]["content"] == "ping"
+    assert raw_entry["response_raw"] == {
+        "reasoning": "thinking",
+        "content": "hello from llama",
+    }
+
+    logs_response = client.get("/api/logs?page=1&size=10")
+    assert logs_response.json()["total"] == 1
+
+
+def test_streaming_openai_chat_proxy_persists_logs_for_logs_page(tmp_path, monkeypatch):
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "stream": True,
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+
+    assert response.status_code == 200
+    history_file = history_file_for(tmp_path)
+    assert history_file.exists()
+    raw_entry = json.loads(history_file.read_text(encoding="utf-8").strip())
+    assert raw_entry["response_raw"] == {
+        "reasoning": "thinking ",
+        "content": "hello from stream",
+    }
+    assert client.get("/api/logs?page=1&size=10").json()["entries"][0]["content"] == "hello from stream"
