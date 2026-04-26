@@ -139,7 +139,29 @@ def test_openai_api_request_can_proxy_to_llama_server(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert FakeAsyncClient.requests[0]["method"] == "POST"
     assert FakeAsyncClient.requests[0]["url"] == "http://127.0.0.1:8891/v1/chat/completions"
-    assert FakeAsyncClient.requests[0]["content"] == b'{"model":"local"}'
+    forwarded = json.loads(FakeAsyncClient.requests[0]["content"].decode("utf-8"))
+    assert forwarded["model"] == "local"
+
+
+def test_openai_chat_without_reasoning_field_defaults_to_thinking_disabled(tmp_path, monkeypatch):
+    FakeAsyncClient.requests = []
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", FakeAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+
+    assert response.status_code == 200
+    forwarded = json.loads(FakeAsyncClient.requests[0]["content"].decode("utf-8"))
+    assert "reasoning" not in forwarded
+    assert "reasoning_effort" not in forwarded
+    assert forwarded["chat_template_kwargs"]["enable_thinking"] is False
+    assert forwarded["thinking_budget_tokens"] == 0
 
 
 def test_openai_reasoning_effort_off_maps_to_llama_thinking_disabled(tmp_path, monkeypatch):

@@ -399,7 +399,9 @@ Supported effort values are `off`, `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `extra_high`, `extra high`, and `auto`. For llama.cpp, `off` maps to
 `chat_template_kwargs.enable_thinking=false` and `thinking_budget_tokens=0`.
 Other effort values enable thinking and set a reasoning budget for the request.
-EZLLM also accepts OpenAI Chat Completions style `reasoning_effort`.
+EZLLM also accepts OpenAI Chat Completions style `reasoning_effort`. If neither
+`reasoning` nor `reasoning_effort` is sent, EZLLM defaults chat requests to
+thinking disabled.
 
 The browser page can edit the same runtime and llama parameters, then schedule a
 restart so the saved settings take effect.

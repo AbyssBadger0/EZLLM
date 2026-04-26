@@ -50,7 +50,7 @@ def _normalize_effort(value: Any) -> str | None:
     return EFFORT_ALIASES.get(text)
 
 
-def _extract_unified_effort(payload: dict[str, Any]) -> str | None:
+def _extract_unified_effort(payload: dict[str, Any]) -> str:
     reasoning = payload.get("reasoning")
     if isinstance(reasoning, dict):
         effort = _normalize_effort(reasoning.get("effort"))
@@ -61,7 +61,7 @@ def _extract_unified_effort(payload: dict[str, Any]) -> str | None:
         if effort:
             return effort
 
-    return _normalize_effort(payload.get("reasoning_effort"))
+    return _normalize_effort(payload.get("reasoning_effort")) or "off"
 
 
 def _copy_payload(body: bytes) -> dict[str, Any] | None:
