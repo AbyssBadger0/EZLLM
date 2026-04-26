@@ -1,49 +1,39 @@
 # EZLLM
 
-[简体中文](README.zh-CN.md)
+[English](README.md)
 
-Cross-platform local LLM runtime, browser workbench, and OpenAI-compatible proxy
-for llama.cpp.
+EZLLM 是一个跨平台的本地 LLM 运行时、浏览器工作台和 OpenAI-compatible 代理，基于 llama.cpp 管理本地模型服务。
 
-## What EZLLM Does
+## EZLLM 是什么
 
-EZLLM currently provides a CLI-managed local runtime that launches both the
-FastAPI workbench proxy and a configured `llama-server` process. It exposes a
-browser workbench, the llama.cpp Web UI, logs, health, runtime metadata, and
-OpenAI-compatible llama.cpp API proxying.
+EZLLM 现在可以通过 CLI 启动并管理本地运行时：它会启动 FastAPI 工作台代理和配置好的 `llama-server` 进程。它提供浏览器工作台、llama.cpp Web UI、日志页面、健康检查、运行时元信息，以及 OpenAI-compatible 的 llama.cpp API 代理。
 
-EZLLM does not include model files or llama.cpp binaries. Bring your own GGUF
-model and point EZLLM at a compatible `llama-server` binary.
+EZLLM 不内置模型文件，也不把 llama.cpp 二进制文件提交到仓库。你需要自己准备 GGUF 模型，并把 EZLLM 指向一个可用的 `llama-server`。
 
-## Features
+## 功能特性
 
-- Manage a local `llama-server` process from the EZLLM CLI.
-- Serve a browser workbench on one local port.
-- Proxy the native llama.cpp Web UI under `/llama/`.
-- Provide OpenAI-compatible chat completion proxying on `/v1/chat/completions`.
-- Capture chat request/response logs for inspection.
-- Configure model paths, llama.cpp binaries, and reasoning behavior from a
-  browser Control page.
-- Scan local model and llama.cpp folders without committing large binaries or
-  model files.
+- 通过 EZLLM CLI 管理本地 `llama-server` 进程
+- 在一个本地端口上提供浏览器工作台
+- 把 llama.cpp 原生 Web UI 代理到 `/llama/`
+- 在 `/v1/chat/completions` 提供 OpenAI-compatible 聊天代理
+- 记录聊天请求和响应，方便在日志页面检查
+- 通过浏览器 Control 页面配置模型路径、llama.cpp 二进制文件和 reasoning 行为
+- 扫描本地模型目录和 llama.cpp 目录，同时避免把大模型或二进制文件提交到仓库
 
-## Requirements
+## 运行要求
 
-- Python 3.11 or newer.
-- A compatible `llama-server` binary from llama.cpp.
-- At least one local GGUF model file.
-- A GPU and matching runtime are optional but recommended for larger models.
+- Python 3.11 或更高版本
+- 一个兼容的 llama.cpp `llama-server` 二进制文件
+- 至少一个本地 GGUF 模型文件
+- GPU 和对应运行时不是必须的，但大模型强烈建议使用
 
-## Platform Support
+## 平台支持
 
-- Windows: tested with the CLI-managed runtime and the bundled llama.cpp
-  installer script.
-- Linux: supported by the Python runtime, config paths, process manager, and CI
-  test suite. Install or build `llama-server` manually, then point EZLLM at it.
-- macOS: basic runtime paths are supported. Install or build `llama-server`
-  manually.
+- Windows：已验证 CLI 托管运行时和随仓库提供的 llama.cpp 安装脚本。
+- Linux：Python 运行时、配置路径、进程管理和 CI 测试均已覆盖。需要手动安装或编译 `llama-server`。
+- macOS：基础运行时路径可用。需要手动安装或编译 `llama-server`。
 
-## Install EZLLM
+## 安装 EZLLM
 
 ### Windows PowerShell
 
@@ -53,14 +43,14 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Check the CLI:
+检查 CLI：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ezllm.cli --help
 .\.venv\Scripts\python.exe -m ezllm.cli doctor
 ```
 
-### Linux or macOS
+### Linux 或 macOS
 
 ```bash
 cd /path/to/EZLLM
@@ -70,62 +60,56 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
 ```
 
-Check the CLI:
+检查 CLI：
 
 ```bash
 python -m ezllm.cli --help
 python -m ezllm.cli doctor
 ```
 
-## Install llama.cpp Runtime
+## 安装 llama.cpp 运行时
 
-Do not commit llama.cpp release zips, DLLs, models, or build outputs into this
-repository. Windows CUDA bundles can be hundreds of MB because they include
-NVIDIA runtime DLLs. This repo keeps those files out of Git and downloads them
-locally when needed.
+请不要把 llama.cpp release 压缩包、DLL、模型或编译产物提交到这个仓库。Windows CUDA 包可能有数百 MB，因为它们包含 NVIDIA 运行时 DLL。EZLLM 会把这些文件放在本地目录，并通过 `.gitignore` 忽略。
 
-### Windows: Download Official Release Assets
+### Windows：下载官方 release
 
-On Windows, run:
+在 Windows 上运行：
 
 ```powershell
-# Auto-pick cuda13 for Blackwell/compute capability 12.x NVIDIA GPUs,
-# cuda12 for other NVIDIA GPUs, otherwise CPU.
+# 自动选择后端：Blackwell/compute capability 12.x NVIDIA GPU 使用 cuda13，
+# 其他 NVIDIA GPU 使用 cuda12，否则使用 CPU。
 .\scripts\install_llama_cpp.ps1
 
-# Or choose explicitly.
+# 也可以手动指定。
 .\scripts\install_llama_cpp.ps1 -Backend cuda13
 .\scripts\install_llama_cpp.ps1 -Backend cuda12
 .\scripts\install_llama_cpp.ps1 -Backend cpu
 .\scripts\install_llama_cpp.ps1 -Backend vulkan
 ```
 
-The script downloads the latest official `ggml-org/llama.cpp` release into:
+脚本会把最新的 `ggml-org/llama.cpp` 官方 release 下载到：
 
 ```text
 vendor/llama/win-x64-<backend>/
 ```
 
-For CUDA backends it downloads both the llama.cpp binary zip and the matching
-`cudart-...` runtime zip. You still need a compatible NVIDIA driver installed,
-but you do not need Visual Studio, CMake, or the CUDA Toolkit just to run the
-downloaded binary.
+CUDA 后端会同时下载 llama.cpp 二进制 zip 和匹配的 `cudart-...` 运行时 zip。你仍然需要安装兼容的 NVIDIA 驱动，但仅运行下载好的二进制包时，不需要 Visual Studio、CMake 或 CUDA Toolkit。
 
-Use `-DryRun` to see what would be downloaded:
+可以用 `-DryRun` 预览下载内容：
 
 ```powershell
 .\scripts\install_llama_cpp.ps1 -Backend cuda13 -DryRun
 ```
 
-### Windows: Manual Download
+### Windows：手动下载
 
-You can also download packages manually from:
+也可以从以下地址手动下载：
 
 ```text
 https://github.com/ggml-org/llama.cpp/releases
 ```
 
-Choose one Windows x64 package:
+选择一个 Windows x64 包：
 
 ```text
 llama-<tag>-bin-win-cpu-x64.zip
@@ -134,27 +118,26 @@ llama-<tag>-bin-win-cuda-12.4-x64.zip
 llama-<tag>-bin-win-vulkan-x64.zip
 ```
 
-For CUDA, also download the matching runtime package:
+CUDA 还需要下载匹配的运行时包：
 
 ```text
 cudart-llama-bin-win-cuda-13.1-x64.zip
 cudart-llama-bin-win-cuda-12.4-x64.zip
 ```
 
-Extract the files into a local folder such as:
+解压到本地目录，例如：
 
 ```text
 vendor/llama/win-x64-cuda13/
 ```
 
-Keep `llama-server.exe` together with all DLLs from the same release.
+请保持 `llama-server.exe` 和同一 release 的 DLL 文件在一起。
 
-### Windows: Build From Source
+### Windows：从源码编译
 
-Use this route if you want a custom CUDA architecture, a newer source commit
-than the latest release, or local build flags.
+如果你需要自定义 CUDA 架构、使用比 release 更新的源码，或指定本地编译参数，可以从源码编译。
 
-Windows CUDA example:
+Windows CUDA 示例：
 
 ```powershell
 git clone https://github.com/ggml-org/llama.cpp C:\Users\$env:USERNAME\llama.cpp
@@ -168,15 +151,15 @@ cmake -S . -B build-cuda -G Ninja `
 cmake --build build-cuda --target llama-server -j 16
 ```
 
-The built server is usually here:
+编译后的 server 通常在：
 
 ```text
 C:\Users\<you>\llama.cpp\build-cuda\bin\llama-server.exe
 ```
 
-### Linux: Build llama.cpp
+### Linux：编译 llama.cpp
 
-Install your distribution's build tools, CMake, and a compiler first. CPU build:
+先安装发行版对应的构建工具、CMake 和编译器。CPU 构建：
 
 ```bash
 git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp
@@ -189,7 +172,7 @@ cmake -S . -B build-cpu \
 cmake --build build-cpu --target llama-server -j "$(nproc)"
 ```
 
-CUDA build:
+CUDA 构建：
 
 ```bash
 git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp
@@ -203,18 +186,16 @@ cmake -S . -B build-cuda \
 cmake --build build-cuda --target llama-server -j "$(nproc)"
 ```
 
-The built server is usually here:
+编译后的 server 通常在：
 
 ```text
 /home/<you>/llama.cpp/build-cpu/bin/llama-server
 /home/<you>/llama.cpp/build-cuda/bin/llama-server
 ```
 
-You can also extract an official Linux release into an ignored local folder such
-as `vendor/llama/linux-x64-cpu/` and point `llama.server_bin` at the extracted
-`llama-server` binary.
+你也可以把官方 Linux release 解压到被 Git 忽略的本地目录，例如 `vendor/llama/linux-x64-cpu/`，然后把 `llama.server_bin` 指向其中的 `llama-server`。
 
-### macOS: Build llama.cpp
+### macOS：编译 llama.cpp
 
 ```bash
 git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp
@@ -227,15 +208,15 @@ cmake -S . -B build \
 cmake --build build --target llama-server -j 8
 ```
 
-The built server is usually here:
+编译后的 server 通常在：
 
 ```text
 /Users/<you>/llama.cpp/build/bin/llama-server
 ```
 
-## Configure EZLLM
+## 配置 EZLLM
 
-Create a config file at the platform default location:
+在平台默认位置创建配置文件：
 
 ```text
 Windows: C:\Users\<you>\AppData\Roaming\EZLLM\config.toml
@@ -243,7 +224,7 @@ Linux:   ~/.config/ezllm/config.toml
 macOS:   ~/Library/Application Support/EZLLM/config.toml
 ```
 
-Windows example:
+Windows 示例：
 
 ```toml
 [runtime]
@@ -273,7 +254,7 @@ reasoning_format = "deepseek"
 reasoning_budget = "-1"
 ```
 
-Linux example:
+Linux 示例：
 
 ```toml
 [runtime]
@@ -303,46 +284,45 @@ reasoning_format = "deepseek"
 reasoning_budget = "-1"
 ```
 
-You can also point `model_path` at a GGUF file downloaded by LM Studio, for
-example under:
+LM Studio 下载的 GGUF 模型也可以直接使用，例如 Windows 下通常在：
 
 ```text
 C:\Users\<you>\.lmstudio\models\
 ```
 
-## Run
+## 运行
 
-Start EZLLM in the foreground:
+前台启动：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ezllm.cli run
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 python -m ezllm.cli run
 ```
 
-Start it in the background and open the browser control page:
+后台启动并打开浏览器控制台：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ezllm.cli start --open
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 python -m ezllm.cli start --open
 ```
 
-The workbench is available at:
+工作台地址：
 
 ```text
 http://127.0.0.1:8888/
 ```
 
-From the workbench, open:
+工作台中可以进入：
 
 ```text
 http://127.0.0.1:8888/llama/
@@ -350,10 +330,9 @@ http://127.0.0.1:8888/control
 http://127.0.0.1:8888/logs
 ```
 
-EZLLM keeps `8889` as the internal llama.cpp server port, while browser and API
-entrypoints can stay on `8888`.
+EZLLM 会把 `8889` 作为内部 llama.cpp server 端口，浏览器和 API 入口可以统一使用 `8888`。
 
-Useful CLI commands:
+常用 CLI 命令：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ezllm.cli status
@@ -363,7 +342,7 @@ Useful CLI commands:
 .\.venv\Scripts\python.exe -m ezllm.cli config set llama.ctx_size 65536
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 python -m ezllm.cli status
@@ -373,7 +352,7 @@ python -m ezllm.cli open
 python -m ezllm.cli config set llama.ctx_size 65536
 ```
 
-Useful diagnostics:
+诊断命令：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ezllm.cli doctor
@@ -381,15 +360,14 @@ Invoke-RestMethod http://127.0.0.1:8888/healthz
 Invoke-RestMethod http://127.0.0.1:8888/runtime-config
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 curl http://127.0.0.1:8888/healthz
 curl http://127.0.0.1:8888/runtime-config
 ```
 
-EZLLM manages `llama-server` internally after `run` or `start`. You can send
-local chat smoke tests through EZLLM on port `8888`:
+EZLLM 在 `run` 或 `start` 后会托管 `llama-server`。你可以通过 `8888` 发送本地聊天测试：
 
 ```powershell
 Invoke-RestMethod `
@@ -399,7 +377,7 @@ Invoke-RestMethod `
   -Body '{"model":"local","messages":[{"role":"user","content":"Say hello in one short sentence."}],"stream":false}'
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 curl -s http://127.0.0.1:8888/v1/chat/completions \
@@ -407,8 +385,9 @@ curl -s http://127.0.0.1:8888/v1/chat/completions \
   -d '{"model":"local","messages":[{"role":"user","content":"Say hello in one short sentence."}],"stream":false}'
 ```
 
-EZLLM also accepts a provider-neutral reasoning control parameter and maps it to
-the active llama.cpp backend before forwarding:
+## Reasoning / Thinking 控制
+
+EZLLM 支持一个供应商中立的 reasoning 控制字段，并会在转发给 llama.cpp 前映射到 llama.cpp 参数：
 
 ```json
 {
@@ -418,32 +397,30 @@ the active llama.cpp backend before forwarding:
 }
 ```
 
-Supported effort values are `off`, `none`, `minimal`, `low`, `medium`, `high`,
-`xhigh`, `extra_high`, `extra high`, and `auto`. For llama.cpp, `off` maps to
-`chat_template_kwargs.enable_thinking=false` and `thinking_budget_tokens=0`.
-Other effort values enable thinking and set a reasoning budget for the request.
-EZLLM also accepts OpenAI Chat Completions style `reasoning_effort`. If neither
-`reasoning` nor `reasoning_effort` is sent, EZLLM defaults chat requests to
-thinking disabled.
+支持的 effort 值包括：`off`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`extra_high`、`extra high` 和 `auto`。
 
-The browser page can edit the same runtime and llama parameters, then schedule a
-restart so the saved settings take effect.
+对 llama.cpp 来说：
 
-The Control page also includes local discovery helpers:
+- `off` 会映射为 `chat_template_kwargs.enable_thinking=false` 和 `thinking_budget_tokens=0`
+- 其他 effort 值会启用 thinking，并设置请求级 reasoning budget
+- 也兼容 OpenAI Chat Completions 风格的 `reasoning_effort`
+- 如果请求里既没有 `reasoning`，也没有 `reasoning_effort`，EZLLM 默认关闭思考模式
 
-- Add one or more `Model Scan Directories`, then click `Scan Models` to fill a
-  model dropdown from `.gguf` files. Selecting a model writes `llama.model_path`
-  and automatically fills `llama.mmproj_path` when a matching `mmproj*.gguf`
-  file is found in the same folder.
-- Add one or more `llama.cpp Directories`, then click `Scan llama.cpp` to find
-  `llama-server` or `llama-server.exe` binaries. Selecting one writes
-  `llama.server_bin`.
-- Use `Browse` or `Add Folder` in Control to navigate local folders from the
-  browser UI when you do not want to paste paths manually.
+## 浏览器 Control 页面
 
-## Parameter Environment Overrides
+Control 页面可以编辑运行时和 llama 参数，并安排重启让配置生效。它还提供本地发现能力：
 
-The config file can be overridden with environment variables:
+- 添加一个或多个 `Model Scan Directories`，点击 `Scan Models`，从 `.gguf` 文件生成模型下拉框
+- 选中模型后写入 `llama.model_path`，如果同目录存在 `mmproj*.gguf`，会自动填入 `llama.mmproj_path`
+- 添加一个或多个 `llama.cpp Directories`，点击 `Scan llama.cpp`，查找 `llama-server` 或 `llama-server.exe`
+- 选中 server 后写入 `llama.server_bin`
+- 可以使用 `Browse` 或 `Add Folder` 在网页里浏览本机目录，避免手动复制路径
+
+## 环境变量覆盖
+
+配置文件可以被环境变量覆盖。
+
+Windows PowerShell：
 
 ```powershell
 $env:EZLLM_CONFIG = 'C:\path\to\config.toml'
@@ -455,7 +432,7 @@ $env:EZLLM_N_PREDICT = '16384'
 $env:EZLLM_REASONING = 'off'
 ```
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 export EZLLM_CONFIG='/path/to/config.toml'

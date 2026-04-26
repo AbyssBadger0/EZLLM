@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ezllm"
 version = "0.1.0"
-description = "Cross-platform local LLM runtime and CLI with legacy lm_core compatibility."
+description = "Cross-platform local LLM runtime, browser workbench, and OpenAI-compatible proxy for llama.cpp."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
