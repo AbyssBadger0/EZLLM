@@ -18,7 +18,25 @@ def _settings(tmp_path):
             proxy_port=8888,
             llama_port=8889,
         ),
-        llama=SimpleNamespace(server_bin="llama-server", model_path="model.gguf"),
+        llama=SimpleNamespace(
+            server_bin="llama-server",
+            model_path="model.gguf",
+            mmproj_path=None,
+            gpu_layers=999,
+            ctx_size=200000,
+            n_predict=81920,
+            cache_k_type="q8_0",
+            cache_v_type="q8_0",
+            flash_attn="on",
+            batch_size=512,
+            parallel=1,
+            temp="0.7",
+            top_p="0.95",
+            top_k="20",
+            reasoning="auto",
+            reasoning_format="deepseek",
+            reasoning_budget="-1",
+        ),
     )
 
 
@@ -139,6 +157,40 @@ def test_runtime_manager_stop_only_terminates_owned_proxy_pid_from_state(tmp_pat
 
     assert result == "EZLLM stopped"
     assert set(terminated) == {(101, False)}
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_stop_terminates_owned_proxy_and_llama_pids(tmp_path):
+    terminated = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            if port == 8888:
+                return {101}
+            if port == 8889:
+                return {202}
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            terminated.append((pid, force))
+
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=202,
+            proxy_port=8888,
+            llama_port=8889,
+            status="running",
+        ),
+    )
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    result = manager.stop()
+
+    assert result == "EZLLM stopped"
+    assert set(terminated) == {(101, False), (202, False)}
     assert load_runtime_state(tmp_path) is None
 
 
@@ -280,7 +332,7 @@ def test_runtime_manager_start_background_rejects_foreign_port_conflicts_without
             raise AssertionError("foreign pid should not be terminated without --force")
 
     spawned = []
-    monkeypatch.setattr("ezllm.runtime.manager.spawn_background", lambda command: spawned.append(command))
+    monkeypatch.setattr("ezllm.runtime.manager.spawn_background", lambda command, **kwargs: spawned.append(command))
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
 
@@ -313,7 +365,7 @@ def test_runtime_manager_start_background_restarts_owned_port_conflicts(tmp_path
     )
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: SimpleNamespace(pid=303),
+        lambda command, **kwargs: SimpleNamespace(pid=303),
     )
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
@@ -322,7 +374,7 @@ def test_runtime_manager_start_background_restarts_owned_port_conflicts(tmp_path
     state = load_runtime_state(tmp_path)
 
     assert "starting" in result.lower()
-    assert set(terminated) == {(101, False)}
+    assert set(terminated) == {(101, False), (202, False)}
     assert state is not None
     assert state.proxy_pid == 303
     assert state.status == "starting"
@@ -355,7 +407,7 @@ def test_runtime_manager_start_background_treats_starting_proxy_pid_without_list
     )
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: spawned.append(command) or SimpleNamespace(pid=202),
+        lambda command, **kwargs: spawned.append(command) or SimpleNamespace(pid=202),
     )
 
     result = manager.start_background(force=False)
@@ -409,7 +461,7 @@ def test_runtime_manager_start_background_treats_legacy_background_child_without
     )
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: spawned.append(command) or SimpleNamespace(pid=202),
+        lambda command, **kwargs: spawned.append(command) or SimpleNamespace(pid=202),
     )
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
@@ -432,6 +484,8 @@ def test_runtime_manager_start_background_restart_does_not_kill_foreign_listener
 
     class FakePlatformAdapter:
         def find_listening_pids(self, port):
+            if port == 8889:
+                return set()
             lookup_count[port] = lookup_count.get(port, 0) + 1
             if port == 8888 and lookup_count[port] == 1:
                 return {101}
@@ -452,7 +506,7 @@ def test_runtime_manager_start_background_restart_does_not_kill_foreign_listener
     )
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: SimpleNamespace(pid=303),
+        lambda command, **kwargs: SimpleNamespace(pid=303),
     )
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
@@ -466,7 +520,9 @@ def test_runtime_manager_start_background_restart_does_not_kill_foreign_listener
     assert state.proxy_pid == 303
 
 
-def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tmp_path, monkeypatch):
+def test_runtime_manager_start_background_rejects_foreign_llama_port_listener_without_force(
+    tmp_path, monkeypatch
+):
     terminated = []
 
     class FakePlatformAdapter:
@@ -476,21 +532,17 @@ def test_runtime_manager_start_background_ignores_foreign_llama_port_listener(tm
         def terminate_tree(self, pid, *, force=False):
             terminated.append((pid, force))
 
-    monkeypatch.setattr(
-        "ezllm.runtime.manager.spawn_background",
-        lambda command: SimpleNamespace(pid=606),
-    )
+    spawned = []
+    monkeypatch.setattr("ezllm.runtime.manager.spawn_background", lambda command, **kwargs: spawned.append(command))
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
 
-    result = manager.start_background(force=False)
-    state = load_runtime_state(tmp_path)
+    with pytest.raises(RuntimeError, match="in use"):
+        manager.start_background(force=False)
 
-    assert "starting" in result.lower()
     assert terminated == []
-    assert state is not None
-    assert state.proxy_pid == 606
-    assert state.status == "starting"
+    assert spawned == []
+    assert load_runtime_state(tmp_path) is None
 
 
 def test_runtime_manager_start_background_detects_owned_instance_on_persisted_proxy_port_after_config_drift(
@@ -519,7 +571,7 @@ def test_runtime_manager_start_background_detects_owned_instance_on_persisted_pr
     )
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: SimpleNamespace(pid=303),
+        lambda command, **kwargs: SimpleNamespace(pid=303),
     )
 
     manager = RuntimeManager(settings, platform_adapter=FakePlatformAdapter())
@@ -594,6 +646,15 @@ def test_runtime_manager_run_foreground_does_not_self_conflict_with_matching_sta
         ),
     )
     monkeypatch.setattr("ezllm.runtime.manager.build_app", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.start_llama_server",
+        lambda settings, log_dir: SimpleNamespace(
+            pid=222,
+            poll=lambda: None,
+            terminate=lambda: None,
+            wait=lambda timeout=None: None,
+        ),
+    )
 
     def fake_uvicorn_run(*args, **kwargs):
         state = load_runtime_state(tmp_path)
@@ -608,6 +669,95 @@ def test_runtime_manager_run_foreground_does_not_self_conflict_with_matching_sta
     assert calls[0][3] == "running"
     assert calls[0][1]["host"] == "127.0.0.1"
     assert calls[0][1]["port"] == 8888
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_run_foreground_allows_starting_wrapper_pid_without_listener(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            raise AssertionError("run_foreground should not terminate processes")
+
+    class WrapperProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def create_time(self):
+            return 1234.0
+
+        def cmdline(self):
+            return [
+                sys.executable,
+                "-c",
+                "from ezllm.config.loader import load_settings; from ezllm.runtime.manager import RuntimeManager; RuntimeManager(load_settings()).run_foreground()",
+            ]
+
+    monkeypatch.setattr("ezllm.runtime.manager.psutil.Process", WrapperProcess)
+    save_runtime_state(
+        tmp_path,
+        RuntimeState(
+            proxy_pid=101,
+            llama_pid=None,
+            proxy_port=8888,
+            llama_port=8889,
+            status="starting",
+            started_at=None,
+        ),
+    )
+    monkeypatch.setattr("ezllm.runtime.manager.build_app", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.start_llama_server",
+        lambda settings, log_dir: SimpleNamespace(
+            pid=222,
+            poll=lambda: None,
+            terminate=lambda: None,
+            wait=lambda timeout=None: None,
+        ),
+    )
+    monkeypatch.setattr("ezllm.runtime.manager.uvicorn.run", lambda *args, **kwargs: calls.append(kwargs))
+
+    RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter()).run_foreground()
+
+    assert calls == [{"host": "127.0.0.1", "port": 8888}]
+    assert load_runtime_state(tmp_path) is None
+
+
+def test_runtime_manager_run_foreground_starts_llama_server_and_persists_pid(tmp_path, monkeypatch):
+    calls = []
+
+    class FakePlatformAdapter:
+        def find_listening_pids(self, port):
+            return set()
+
+        def terminate_tree(self, pid, *, force=False):
+            raise AssertionError("run_foreground should not terminate through the adapter")
+
+    monkeypatch.setattr("ezllm.runtime.manager.build_app", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "ezllm.runtime.manager.start_llama_server",
+        lambda settings, log_dir: calls.append(("start_llama", settings, log_dir))
+        or SimpleNamespace(pid=222, poll=lambda: None, terminate=lambda: None, wait=lambda timeout=None: None),
+    )
+
+    def fake_uvicorn_run(*args, **kwargs):
+        state = load_runtime_state(tmp_path)
+        calls.append(("uvicorn", kwargs, state.llama_pid if state else None, state.status if state else None))
+
+    monkeypatch.setattr("ezllm.runtime.manager.uvicorn.run", fake_uvicorn_run)
+
+    manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
+
+    manager.run_foreground()
+
+    assert calls[0][0] == "start_llama"
+    assert calls[0][2] == tmp_path / "logs"
+    assert calls[1] == ("uvicorn", {"host": "127.0.0.1", "port": 8888}, 222, "running")
     assert load_runtime_state(tmp_path) is None
 
 
@@ -731,7 +881,7 @@ def test_runtime_manager_start_background_force_terminates_foreign_listeners(tmp
 
     monkeypatch.setattr(
         "ezllm.runtime.manager.spawn_background",
-        lambda command: SimpleNamespace(pid=606),
+        lambda command, **kwargs: SimpleNamespace(pid=606),
     )
 
     manager = RuntimeManager(_settings(tmp_path), platform_adapter=FakePlatformAdapter())
@@ -739,7 +889,7 @@ def test_runtime_manager_start_background_force_terminates_foreign_listeners(tmp
     manager.start_background(force=True)
     state = load_runtime_state(tmp_path)
 
-    assert set(terminated) == {(404, True)}
+    assert set(terminated) == {(404, True), (505, True)}
     assert state is not None
     assert state.proxy_pid == 606
     assert state.status == "starting"

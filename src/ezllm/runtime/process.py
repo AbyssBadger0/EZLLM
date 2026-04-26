@@ -10,11 +10,20 @@ def spawn_background(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.Popen:
+    env_vars = {**os.environ, **(env or {})}
+    background_log = env_vars.get("EZLLM_BACKGROUND_LOG")
+    stdout = subprocess.DEVNULL
+    stderr = subprocess.DEVNULL
+    log_handle = None
+    if background_log:
+        log_handle = open(background_log, "ab")
+        stdout = log_handle
+        stderr = subprocess.STDOUT
     popen_kwargs = {
         "cwd": cwd,
-        "env": {**os.environ, **(env or {})},
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
+        "env": env_vars,
+        "stdout": stdout,
+        "stderr": stderr,
     }
     if sys.platform == "win32":
         popen_kwargs["creationflags"] = (
@@ -22,4 +31,8 @@ def spawn_background(
         )
     else:
         popen_kwargs["start_new_session"] = True
-    return subprocess.Popen(list(command), **popen_kwargs)
+    try:
+        return subprocess.Popen(list(command), **popen_kwargs)
+    finally:
+        if log_handle is not None:
+            log_handle.close()

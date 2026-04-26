@@ -59,8 +59,8 @@ def _expected_runtime_payload(tmp_path: Path) -> dict:
             "binary": "llama-server",
             "model_path": r"C:\models\legacy-model.gguf",
             "model_file": "legacy-model.gguf",
-            "ctx_size": 32768,
-            "n_predict": 4096,
+            "ctx_size": 200000,
+            "n_predict": 81920,
         },
         "cloud": {
             "provider": "openai",

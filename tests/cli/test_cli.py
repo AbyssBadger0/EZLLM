@@ -134,6 +134,54 @@ def test_start_accepts_force_flag(monkeypatch, tmp_path):
     assert called["force"] is True
 
 
+def test_start_open_launches_browser_control_page(monkeypatch, tmp_path):
+    called = {}
+    opened = []
+
+    settings = SimpleNamespace(
+        runtime=SimpleNamespace(
+            state_dir=str(tmp_path),
+            host="127.0.0.1",
+            proxy_port=8888,
+            llama_port=8889,
+        ),
+        llama=SimpleNamespace(server_bin="llama-server", model_path="model.gguf"),
+    )
+
+    class FakeManager:
+        def __init__(self, incoming_settings):
+            called["settings"] = incoming_settings
+
+        def start_background(self, *, force=False):
+            called["force"] = force
+            return "EZLLM starting"
+
+    monkeypatch.setattr("ezllm.cli.load_settings", lambda: settings)
+    monkeypatch.setattr("ezllm.cli.RuntimeManager", FakeManager)
+    monkeypatch.setattr("ezllm.cli.webbrowser.open", lambda url: opened.append(url))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["start", "--open"])
+
+    assert result.exit_code == 0
+    assert called["settings"] is settings
+    assert opened == ["http://127.0.0.1:8888/control"]
+
+
+def test_config_set_updates_llama_parameter(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    _write_full_config(config_path, state_dir=tmp_path / "state")
+    monkeypatch.setenv("EZLLM_CONFIG", str(config_path))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "set", "llama.ctx_size", "200000"])
+
+    assert result.exit_code == 0
+    text = config_path.read_text(encoding="utf-8")
+    assert "ctx_size = 200000" in text
+    assert "Updated llama.ctx_size" in result.stdout
+
+
 def test_restart_accepts_force_flag(monkeypatch, tmp_path):
     called = []
 

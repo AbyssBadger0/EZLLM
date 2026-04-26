@@ -6,7 +6,7 @@ class WindowsPlatformAdapter:
         return {
             conn.pid
             for conn in psutil.net_connections(kind="inet")
-            if conn.laddr and conn.laddr.port == port and conn.pid
+            if conn.laddr and conn.laddr.port == port and conn.pid and conn.status == psutil.CONN_LISTEN
         }
 
     def terminate_tree(self, pid: int, *, force: bool = False) -> None:

@@ -23,3 +23,7 @@ htmlcov/
 
 # Local review/test scratch directories
 tmp_review*/
+
+# Downloaded llama.cpp runtime bundles
+vendor/llama/*
+!vendor/llama/README.md

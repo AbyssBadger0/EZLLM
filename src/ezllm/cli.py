@@ -1,6 +1,15 @@
+import webbrowser
+
 import typer
 
-from ezllm.config.loader import _config_path, load_runtime_settings, load_settings, set_active_provider
+from ezllm.config.loader import (
+    _config_path,
+    load_runtime_settings,
+    load_settings,
+    parse_config_value,
+    set_active_provider,
+    set_config_key,
+)
 from ezllm.models.downloader import download_model_artifact
 from ezllm.platform.linux import ensure_linux_systemd
 from ezllm.runtime.manager import RuntimeManager
@@ -9,10 +18,12 @@ app = typer.Typer()
 provider_app = typer.Typer()
 service_app = typer.Typer()
 models_app = typer.Typer()
+config_app = typer.Typer()
 
 app.add_typer(provider_app, name="provider")
 app.add_typer(service_app, name="service")
 app.add_typer(models_app, name="models")
+app.add_typer(config_app, name="config")
 
 
 @app.callback()
@@ -27,13 +38,19 @@ def run() -> None:
 
 
 @app.command()
-def start(force: bool = typer.Option(False, "--force", help="Replace conflicting listeners on EZLLM ports.")) -> None:
+def start(
+    force: bool = typer.Option(False, "--force", help="Replace conflicting listeners on EZLLM ports."),
+    open_browser: bool = typer.Option(False, "--open", help="Open the browser control page after starting."),
+) -> None:
     """Start EZLLM in the background."""
+    settings = load_settings()
     try:
-        typer.echo(RuntimeManager(load_settings()).start_background(force=force))
+        typer.echo(RuntimeManager(settings).start_background(force=force))
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
+    if open_browser:
+        webbrowser.open(_control_url(settings))
 
 
 @app.command()
@@ -67,6 +84,15 @@ def status() -> None:
     typer.echo(RuntimeManager(load_runtime_settings()).format_status())
 
 
+@app.command("open")
+def open_control() -> None:
+    """Open the browser control page."""
+    settings = load_runtime_settings()
+    url = _control_url(settings)
+    webbrowser.open(url)
+    typer.echo(url)
+
+
 @app.command()
 def doctor() -> None:
     """Print runtime diagnostics."""
@@ -75,11 +101,32 @@ def doctor() -> None:
         typer.echo(line)
 
 
+def _control_url(settings) -> str:
+    return f"http://{settings.runtime.host}:{settings.runtime.proxy_port}/control"
+
+
 @provider_app.command("use")
 def provider_use(name: str) -> None:
     """Set the active provider."""
     path = set_active_provider(name)
     typer.echo(f'Active provider set to "{name}" in {path}')
+
+
+@config_app.command("set")
+def config_set(key: str, value: str) -> None:
+    """Set a config value, for example llama.ctx_size 200000."""
+    path = set_config_key(key, parse_config_value(value))
+    typer.echo(f"Updated {key} in {path}")
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Print the active config file."""
+    path = _config_path()
+    if not path.exists():
+        typer.echo(f"Config file does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(path.read_text(encoding="utf-8"))
 
 
 @service_app.command("status")

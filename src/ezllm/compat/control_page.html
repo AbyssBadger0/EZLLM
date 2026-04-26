@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EZLLM Control</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #657080;
+      --line: #d9dee7;
+      --accent: #1463ff;
+      --danger: #b42318;
+      --ok: #087443;
+      --shadow: 0 1px 2px rgba(15, 23, 42, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101317;
+        --panel: #171b21;
+        --text: #e7ebf0;
+        --muted: #a5afbd;
+        --line: #2a313b;
+        --accent: #6ea1ff;
+        --danger: #ff8a7a;
+        --ok: #5ee0a0;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 20px 24px 32px;
+    }
+    .toolbar, .status, form {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px;
+    }
+    .status {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1px;
+      margin: 16px 0;
+      overflow: hidden;
+    }
+    .metric {
+      padding: 12px;
+      background: var(--panel);
+      min-width: 0;
+    }
+    .metric b {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .metric span {
+      display: block;
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
+    form {
+      padding: 18px;
+    }
+    fieldset {
+      border: 0;
+      padding: 0;
+      margin: 0 0 22px;
+    }
+    legend {
+      padding: 0;
+      margin-bottom: 12px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    input, select {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+    input:focus, select:focus, button:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    button, a.button {
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 12px;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    button.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    .message {
+      min-height: 22px;
+      margin-top: 12px;
+      color: var(--muted);
+    }
+    .message.ok { color: var(--ok); }
+    .message.err { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>EZLLM Control</h1>
+    <a class="button" href="/logs">Logs</a>
+  </header>
+  <main>
+    <div class="toolbar" aria-label="runtime actions">
+      <button type="button" onclick="refreshAll()">Refresh</button>
+      <button type="button" onclick="saveConfig()" class="primary">Save</button>
+      <button type="button" onclick="restartRuntime()">Restart</button>
+      <button type="button" onclick="stopRuntime()" class="danger">Stop</button>
+    </div>
+    <section class="status" id="status"></section>
+    <form id="config-form">
+      <fieldset>
+        <legend>Runtime</legend>
+        <div class="grid">
+          <label>Host <input name="runtime.host" autocomplete="off"></label>
+          <label>Proxy Port <input name="runtime.proxy_port" type="number" min="1" max="65535"></label>
+          <label>Llama Port <input name="runtime.llama_port" type="number" min="1" max="65535"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Paths</legend>
+        <div class="grid">
+          <label>Server Bin <input name="llama.server_bin" autocomplete="off"></label>
+          <label>Model Path <input name="llama.model_path" autocomplete="off"></label>
+          <label>MMProj Path <input name="llama.mmproj_path" autocomplete="off"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Llama Parameters</legend>
+        <div class="grid">
+          <label>GPU Layers <input name="llama.gpu_layers" type="number"></label>
+          <label>Context Size <input name="llama.ctx_size" type="number"></label>
+          <label>N Predict <input name="llama.n_predict" type="number"></label>
+          <label>Batch Size <input name="llama.batch_size" type="number"></label>
+          <label>Parallel <input name="llama.parallel" type="number"></label>
+          <label>Flash Attention <input name="llama.flash_attn" autocomplete="off"></label>
+          <label>Cache K Type <input name="llama.cache_k_type" autocomplete="off"></label>
+          <label>Cache V Type <input name="llama.cache_v_type" autocomplete="off"></label>
+          <label>Temperature <input name="llama.temp" autocomplete="off"></label>
+          <label>Top P <input name="llama.top_p" autocomplete="off"></label>
+          <label>Top K <input name="llama.top_k" autocomplete="off"></label>
+          <label>Reasoning <input name="llama.reasoning" autocomplete="off"></label>
+          <label>Reasoning Format <input name="llama.reasoning_format" autocomplete="off"></label>
+          <label>Reasoning Budget <input name="llama.reasoning_budget" autocomplete="off"></label>
+        </div>
+      </fieldset>
+      <div class="message" id="message" role="status"></div>
+    </form>
+  </main>
+  <script>
+    const numericFields = new Set([
+      "runtime.proxy_port", "runtime.llama_port", "llama.gpu_layers",
+      "llama.ctx_size", "llama.n_predict", "llama.batch_size", "llama.parallel"
+    ]);
+    const $ = (selector) => document.querySelector(selector);
+    const setMessage = (text, cls = "") => {
+      const el = $("#message");
+      el.className = `message ${cls}`;
+      el.textContent = text;
+    };
+    const getPath = (obj, path) => path.split(".").reduce((cur, key) => cur ? cur[key] : undefined, obj);
+    const setPath = (obj, path, value) => {
+      const parts = path.split(".");
+      let cur = obj;
+      for (const part of parts.slice(0, -1)) cur = cur[part] ||= {};
+      cur[parts.at(-1)] = value;
+    };
+    async function refreshAll() {
+      const [health, config] = await Promise.all([
+        fetch("/healthz").then(r => r.json()),
+        fetch("/api/control/config").then(r => r.json())
+      ]);
+      $("#status").innerHTML = [
+        ["Proxy", health.proxy],
+        ["Llama", health.llama_status],
+        ["Proxy PID", health.pids?.proxy ?? ""],
+        ["Llama PID", health.pids?.llama ?? ""],
+        ["Model", config.llama?.model_path ?? ""],
+        ["Config", config.config_path ?? ""]
+      ].map(([k, v]) => `<div class="metric"><b>${k}</b><span>${String(v)}</span></div>`).join("");
+      for (const input of document.querySelectorAll("[name]")) {
+        const value = getPath(config, input.name);
+        input.value = value ?? "";
+      }
+      setMessage("Loaded", "ok");
+    }
+    async function saveConfig() {
+      const payload = {};
+      for (const input of document.querySelectorAll("[name]")) {
+        let value = input.value;
+        if (numericFields.has(input.name)) value = Number(value);
+        setPath(payload, input.name, value);
+      }
+      const response = await fetch("/api/control/config", {
+        method: "PUT",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        setMessage(await response.text(), "err");
+        return;
+      }
+      setMessage("Saved", "ok");
+    }
+    async function restartRuntime() {
+      await fetch("/api/control/restart", {method: "POST"});
+      setMessage("Restarting", "ok");
+    }
+    async function stopRuntime() {
+      await fetch("/api/control/stop", {method: "POST"});
+      setMessage("Stopping", "ok");
+    }
+    refreshAll().catch(error => setMessage(String(error), "err"));
+  </script>
+</body>
+</html>

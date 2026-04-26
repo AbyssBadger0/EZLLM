@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from ezllm.platform.windows import WindowsPlatformAdapter
 from ezllm.proxy.app import build_app
 from ezllm.runtime.ports import choose_port_conflict_action
 from ezllm.runtime.process import spawn_background
+from ezllm.runtime.llama import start_llama_server
 from ezllm.runtime.state import RuntimeState, save_runtime_state
 from ezllm.runtime.state import load_runtime_state
 
@@ -52,14 +54,21 @@ class RuntimeManager:
         owned_pids = self._active_owned_pids(state, listeners_by_port)
         listeners.discard(pid)
         owned_pids.discard(pid)
+        if state is not None and state.status == "starting" and not listeners:
+            owned_pids.clear()
         if listeners or owned_pids:
-            raise RuntimeError("EZLLM proxy port is already in use.")
+            raise RuntimeError(
+                "EZLLM proxy or llama port is already in use "
+                f"(listeners={sorted(listeners)}, owned={sorted(owned_pids)})."
+            )
+        log_dir = Path(self.settings.runtime.log_dir)
+        llama_process = start_llama_server(self.settings, log_dir)
         app = build_app(log_dir=Path(self.settings.runtime.log_dir), settings=self.settings)
         save_runtime_state(
             self.state_dir,
             RuntimeState(
                 proxy_pid=pid,
-                llama_pid=None,
+                llama_pid=llama_process.pid,
                 proxy_port=self.settings.runtime.proxy_port,
                 llama_port=self.settings.runtime.llama_port,
                 status="running",
@@ -73,6 +82,7 @@ class RuntimeManager:
                 port=self.settings.runtime.proxy_port,
             )
         finally:
+            self._terminate_process(llama_process)
             self._clear_state()
 
     def start_background(self, *, force: bool = False) -> str:
@@ -85,7 +95,12 @@ class RuntimeManager:
             self._clear_state()
 
         command = self._background_command()
-        process = spawn_background(command)
+        log_dir = Path(self.settings.runtime.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        process = spawn_background(
+            command,
+            env={"EZLLM_BACKGROUND_LOG": str(log_dir / "ezllm-background.log")},
+        )
         save_runtime_state(
             self.state_dir,
             RuntimeState(
@@ -167,9 +182,10 @@ class RuntimeManager:
         ]
 
     def _listeners_by_port(self, state=None) -> dict[int, set[int]]:
-        ports = {self.settings.runtime.proxy_port}
+        ports = {self.settings.runtime.proxy_port, self.settings.runtime.llama_port}
         if state is not None:
             ports.add(state.proxy_port)
+            ports.add(state.llama_port)
         return {
             port: self.platform_adapter.find_listening_pids(port)
             for port in ports
@@ -178,7 +194,7 @@ class RuntimeManager:
     def _owned_pids(self, state) -> set[int]:
         if state is None:
             return set()
-        return {pid for pid in (state.proxy_pid,) if pid}
+        return {pid for pid in (state.proxy_pid, state.llama_pid) if pid}
 
     def _active_owned_pids(self, state, listeners_by_port: dict[int, set[int]]) -> set[int]:
         owned_pids = self._owned_pids(state)
@@ -258,3 +274,15 @@ class RuntimeManager:
     def _terminate_pids(self, pids: set[int], *, force: bool) -> None:
         for pid in pids:
             self.platform_adapter.terminate_tree(pid, force=force)
+
+    def _terminate_process(self, process: subprocess.Popen | None) -> None:
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        except ProcessLookupError:
+            return
