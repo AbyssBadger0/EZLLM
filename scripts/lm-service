@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE_NAME="${LM_SERVICE_NAME:-lm-server.service}"
+PYTHON_BIN="${EZLLM_PYTHON:-python3}"
+
+run_ezllm() {
+  exec "$PYTHON_BIN" -m ezllm.cli "$@"
+}
+
+show_panel() {
+  "$PYTHON_BIN" -m ezllm.cli service status --name "$SERVICE_NAME" || true
+  echo
+  "$PYTHON_BIN" -m ezllm.cli doctor
+  echo
+  echo "Commands:"
+  echo "  lm start        start $SERVICE_NAME"
+  echo "  lm stop         stop $SERVICE_NAME"
+  echo "  lm restart      restart $SERVICE_NAME"
+  echo "  lm status       show systemd status"
+  echo "  lm log          follow journal logs"
+  echo "  lm enable       enable boot start"
+  echo "  lm disable      disable boot start"
+  echo "  lm config       show EZLLM config"
+  echo "  lm doctor       show EZLLM diagnostics"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  ""|help)
+    show_panel
+    ;;
+  start|stop|restart|status|enable|disable|is-enabled)
+    shift || true
+    "$PYTHON_BIN" -m ezllm.cli service "$cmd" --name "$SERVICE_NAME" "$@"
+    ;;
+  log)
+    shift || true
+    "$PYTHON_BIN" -m ezllm.cli service log --name "$SERVICE_NAME" "$@"
+    ;;
+  config)
+    shift || true
+    "$PYTHON_BIN" -m ezllm.cli config show "$@"
+    ;;
+  doctor|open|provider|models|service)
+    run_ezllm "$@"
+    ;;
+  *)
+    run_ezllm "$@"
+    ;;
+esac

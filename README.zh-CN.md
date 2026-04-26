@@ -352,6 +352,23 @@ python -m ezllm.cli open
 python -m ezllm.cli config set llama.ctx_size 65536
 ```
 
+Linux/systemd 服务命令与跨平台运行时命令分开提供。Windows 和非 systemd
+主机会直接拒绝这些命令，不会影响原有 Windows CLI 运行方式。
+
+```bash
+python -m ezllm.cli service install \
+  --name ezllm.service \
+  --python /path/to/python \
+  --config ~/.config/ezllm/config.toml \
+  --user "$USER" \
+  --working-directory /path/to/EZLLM \
+  --enable
+
+python -m ezllm.cli service restart --name ezllm.service
+python -m ezllm.cli service status --name ezllm.service
+python -m ezllm.cli service log --name ezllm.service
+```
+
 诊断命令：
 
 ```powershell

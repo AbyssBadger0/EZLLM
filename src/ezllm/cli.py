@@ -1,4 +1,9 @@
+import getpass
+import os
+import subprocess
+import sys
 import webbrowser
+from pathlib import Path
 
 import typer
 
@@ -11,7 +16,12 @@ from ezllm.config.loader import (
     set_config_key,
 )
 from ezllm.models.downloader import download_model_artifact
-from ezllm.platform.linux import ensure_linux_systemd
+from ezllm.platform.linux import (
+    DEFAULT_SERVICE_NAME,
+    ensure_linux_systemd,
+    install_systemd_service,
+    systemctl_service,
+)
 from ezllm.runtime.manager import RuntimeManager
 
 app = typer.Typer()
@@ -105,6 +115,23 @@ def _control_url(settings) -> str:
     return f"http://{settings.runtime.host}:{settings.runtime.proxy_port}/control"
 
 
+def _default_service_user() -> str:
+    return os.environ.get("SUDO_USER") or getpass.getuser()
+
+
+def _echo_completed_process(result) -> None:
+    output = (getattr(result, "stdout", "") or getattr(result, "stderr", "") or "").rstrip()
+    if output:
+        typer.echo(output)
+
+
+def _exit_from_process_error(exc: subprocess.CalledProcessError) -> None:
+    output = (exc.stderr or exc.stdout or str(exc)).rstrip()
+    if output:
+        typer.echo(output, err=True)
+    raise typer.Exit(code=exc.returncode or 1)
+
+
 @provider_app.command("use")
 def provider_use(name: str) -> None:
     """Set the active provider."""
@@ -130,15 +157,108 @@ def config_show() -> None:
 
 
 @service_app.command("status")
-def service_status() -> None:
-    """Report Linux service command availability."""
+def service_status(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Print Linux systemd service status."""
     try:
         ensure_linux_systemd()
+        result = systemctl_service("status", name, check=False)
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
+    except subprocess.CalledProcessError as exc:
+        _exit_from_process_error(exc)
+    _echo_completed_process(result)
 
-    typer.echo("EZLLM service scaffolding is available on Linux/systemd; systemctl integration is not wired yet.")
+
+@service_app.command("install")
+def service_install(
+    name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name."),
+    python_executable: str = typer.Option(sys.executable, "--python", help="Python executable for the service."),
+    config_path: str | None = typer.Option(None, "--config", help="EZLLM config file path."),
+    user: str | None = typer.Option(None, "--user", help="User account that runs the service."),
+    group: str | None = typer.Option(None, "--group", help="Optional group account that runs the service."),
+    working_directory: str | None = typer.Option(None, "--working-directory", help="Service working directory."),
+    enable: bool = typer.Option(False, "--enable", help="Enable the service at boot after installing."),
+    start_service: bool = typer.Option(False, "--start", help="Restart the service after installing."),
+) -> None:
+    """Install or replace the Linux systemd service unit."""
+    try:
+        ensure_linux_systemd()
+        unit_path = install_systemd_service(
+            name=name,
+            python_executable=python_executable,
+            config_path=str(Path(config_path).expanduser() if config_path else _config_path()),
+            user=user if user is not None else _default_service_user(),
+            group=group,
+            working_directory=str(Path(working_directory).expanduser() if working_directory else Path.cwd()),
+            enable=enable,
+            start=start_service,
+        )
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+    except subprocess.CalledProcessError as exc:
+        _exit_from_process_error(exc)
+    typer.echo(f"Installed {name} at {unit_path}")
+
+
+def _service_action(action: str, name: str, *, check: bool = True) -> None:
+    try:
+        ensure_linux_systemd()
+        result = systemctl_service(action, name, check=check)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+    except subprocess.CalledProcessError as exc:
+        _exit_from_process_error(exc)
+    _echo_completed_process(result)
+
+
+@service_app.command("start")
+def service_start(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Start the Linux systemd service."""
+    _service_action("start", name)
+
+
+@service_app.command("stop")
+def service_stop(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Stop the Linux systemd service."""
+    _service_action("stop", name)
+
+
+@service_app.command("restart")
+def service_restart(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Restart the Linux systemd service."""
+    _service_action("restart", name)
+
+
+@service_app.command("enable")
+def service_enable(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Enable the Linux systemd service at boot."""
+    _service_action("enable", name)
+
+
+@service_app.command("disable")
+def service_disable(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Disable the Linux systemd service at boot."""
+    _service_action("disable", name)
+
+
+@service_app.command("is-enabled")
+def service_is_enabled(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Print whether the Linux systemd service is enabled."""
+    _service_action("is-enabled", name, check=False)
+
+
+@service_app.command("log")
+def service_log(name: str = typer.Option(DEFAULT_SERVICE_NAME, "--name", help="systemd service unit name.")) -> None:
+    """Follow Linux systemd journal logs for the service."""
+    try:
+        ensure_linux_systemd()
+        subprocess.run(["journalctl", "-u", name, "-f"], check=False)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
 
 
 @models_app.command("download")
