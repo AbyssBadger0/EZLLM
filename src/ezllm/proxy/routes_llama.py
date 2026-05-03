@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 import httpx
 
 from ezllm.logs.store import save_raw_log
@@ -74,6 +74,33 @@ def _append_sse_payloads(content: bytes, reasoning_parts: list[str], content_par
             parse_openai_payload_for_log(payload, reasoning_parts, content_parts)
 
 
+def _append_sse_text_lines(
+    text: str,
+    *,
+    pending_line: str,
+    reasoning_parts: list[str],
+    content_parts: list[str],
+) -> str:
+    pending_line += text
+    while "\n" in pending_line:
+        line, pending_line = pending_line.split("\n", 1)
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+
+        data = line.removeprefix("data:").strip()
+        if not data or data == "[DONE]":
+            continue
+
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            parse_openai_payload_for_log(payload, reasoning_parts, content_parts)
+    return pending_line
+
+
 def _extract_response_text(upstream: httpx.Response) -> tuple[str, str]:
     reasoning_parts: list[str] = []
     content_parts: list[str] = []
@@ -115,14 +142,117 @@ def _record_chat_log(
         return
 
 
+def _record_chat_log_from_parts(
+    *,
+    settings: Any,
+    request_json,
+    path: str,
+    reasoning: str,
+    content: str,
+    duration: float,
+) -> None:
+    try:
+        save_raw_log(
+            log_dir=Path(settings.runtime.log_dir),
+            req_j=request_json,
+            reasoning=reasoning,
+            content=content,
+            duration=duration,
+            path=f"/{path.strip('/')}",
+            upstream="local:llama.cpp",
+        )
+    except Exception:
+        return
+
+
+def _is_streaming_chat_request(path: str, request_json: dict[str, Any]) -> bool:
+    return _is_chat_completion(path) and request_json.get("stream") is True
+
+
 def build_llama_proxy_router(settings) -> APIRouter:
     router = APIRouter()
+
+    async def proxy_stream_to_llama(
+        request: Request,
+        *,
+        url: str,
+        path: str,
+        upstream_body: bytes,
+        request_json: dict[str, Any],
+        started: float,
+    ) -> StreamingResponse:
+        client = httpx.AsyncClient(follow_redirects=False, timeout=None)
+        stream_context = client.stream(
+            request.method,
+            url,
+            headers=_filtered_headers(request.headers),
+            content=upstream_body,
+        )
+        try:
+            upstream = await stream_context.__aenter__()
+        except Exception:
+            await client.aclose()
+            raise
+
+        reasoning_parts: list[str] = []
+        content_parts: list[str] = []
+        pending_line = ""
+
+        async def stream_body():
+            nonlocal pending_line
+            try:
+                async for chunk in upstream.aiter_bytes():
+                    pending_line = _append_sse_text_lines(
+                        chunk.decode("utf-8", errors="replace"),
+                        pending_line=pending_line,
+                        reasoning_parts=reasoning_parts,
+                        content_parts=content_parts,
+                    )
+                    if await request.is_disconnected():
+                        break
+                    yield chunk
+            finally:
+                pending_line = _append_sse_text_lines(
+                    "\n",
+                    pending_line=pending_line,
+                    reasoning_parts=reasoning_parts,
+                    content_parts=content_parts,
+                )
+                await stream_context.__aexit__(None, None, None)
+                await client.aclose()
+                if request.method == "POST" and _is_chat_completion(path):
+                    _record_chat_log_from_parts(
+                        settings=settings,
+                        request_json=request_json,
+                        path=path,
+                        reasoning="".join(reasoning_parts),
+                        content="".join(content_parts),
+                        duration=time.perf_counter() - started,
+                    )
+
+        return StreamingResponse(
+            stream_body(),
+            status_code=upstream.status_code,
+            headers=_filtered_headers(upstream.headers),
+            media_type=upstream.headers.get("content-type"),
+        )
 
     async def proxy_to_llama(request: Request, path: str = "") -> Response:
         url = _upstream_url(settings, path, request.scope.get("query_string", b""))
         body = await request.body()
+        request_json = _request_json(body)
         upstream_body = map_unified_reasoning_for_llama(body) if _is_chat_completion(path) else body
         started = time.perf_counter()
+        if request.method == "POST" and _is_streaming_chat_request(path, request_json):
+            return await proxy_stream_to_llama(
+                request,
+                url=url,
+                path=path,
+                upstream_body=upstream_body,
+                request_json=request_json,
+                started=started,
+            )
+
         async with httpx.AsyncClient(follow_redirects=False, timeout=None) as client:
             upstream = await client.request(
                 request.method,
@@ -134,7 +264,7 @@ def build_llama_proxy_router(settings) -> APIRouter:
         if request.method == "POST" and _is_chat_completion(path):
             _record_chat_log(
                 settings=settings,
-                request_json=_request_json(body),
+                request_json=request_json,
                 path=path,
                 upstream=upstream,
                 duration=duration,

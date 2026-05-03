@@ -37,6 +37,9 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return None
 
+    async def aclose(self):
+        return None
+
     async def request(self, method, url, *, headers=None, content=None):
         self.requests.append(
             {
@@ -75,6 +78,35 @@ class FakeAsyncClient:
         if str(url).endswith("/bundle.js?cache=1"):
             return httpx.Response(200, content=b"console.log('llama')", headers={"content-type": "text/javascript"})
         return httpx.Response(200, content=b"<html>llama.cpp</html>", headers={"content-type": "text/html"})
+
+    def stream(self, method, url, *, headers=None, content=None):
+        self.requests.append(
+            {
+                "method": method,
+                "url": str(url),
+                "headers": dict(headers or {}),
+                "content": content,
+            }
+        )
+
+        class FakeStreamingResponse:
+            status_code = 200
+            headers = {"content-type": "text/event-stream"}
+
+            async def aiter_bytes(self):
+                yield b'data: {"choices":[{"delta":{"reasoning_content":"thinking "}}]}\n\n'
+                yield b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'
+                yield b'data: {"choices":[{"delta":{"content":" from stream"}}]}\n\n'
+                yield b"data: [DONE]\n\n"
+
+        class FakeStreamContext:
+            async def __aenter__(self):
+                return FakeStreamingResponse()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+        return FakeStreamContext()
 
 
 def test_root_path_renders_ezllm_workbench(tmp_path, monkeypatch):
@@ -270,3 +302,78 @@ def test_streaming_openai_chat_proxy_persists_logs_for_logs_page(tmp_path, monke
         "content": "hello from stream",
     }
     assert client.get("/api/logs?page=1&size=10").json()["entries"][0]["content"] == "hello from stream"
+
+
+def test_streaming_openai_chat_proxy_uses_upstream_streaming_without_buffering(tmp_path, monkeypatch):
+    chunks = [
+        b'data: {"choices":[{"delta":{"reasoning_content":"thinking "}}]}\n\n',
+        b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+        b'data: {"choices":[{"delta":{"content":" from stream"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+
+    class FakeStreamingUpstream:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes(self):
+            for chunk in chunks:
+                yield chunk
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeStreamingUpstream()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class StreamingOnlyAsyncClient:
+        stream_requests = []
+
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def aclose(self):
+            return None
+
+        async def request(self, *args, **kwargs):
+            raise AssertionError("stream=true requests must not use buffered upstream request")
+
+        def stream(self, method, url, *, headers=None, content=None):
+            self.stream_requests.append(
+                {
+                    "method": method,
+                    "url": str(url),
+                    "headers": dict(headers or {}),
+                    "content": content,
+                }
+            )
+            return FakeStreamContext()
+
+    monkeypatch.setattr("ezllm.proxy.routes_llama.httpx.AsyncClient", StreamingOnlyAsyncClient)
+    client = TestClient(build_app(log_dir=tmp_path, settings=_settings(tmp_path)))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "local",
+            "stream": True,
+            "messages": [{"role": "user", "content": "ping"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"".join(chunks)
+    assert StreamingOnlyAsyncClient.stream_requests[0]["url"] == "http://127.0.0.1:8891/v1/chat/completions"
+
+    raw_entry = json.loads(history_file_for(tmp_path).read_text(encoding="utf-8").strip())
+    assert raw_entry["response_raw"] == {
+        "reasoning": "thinking ",
+        "content": "hello from stream",
+    }
